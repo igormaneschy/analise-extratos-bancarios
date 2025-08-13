@@ -1,0 +1,40 @@
+# requirements.txt - Dependências do projeto
+
+# Leitura e processamento de PDFs
+PyPDF2==3.0.1
+pdfplumber==0.10.3
+
+# Processamento de dados
+pandas==2.1.4
+numpy==1.26.2
+
+# Leitura de Excel/CSV
+openpyxl==3.1.2
+xlrd==2.0.1
+
+# Processamento de texto e regex
+python-dateutil==2.8.2
+
+# Validação de dados
+pydantic==2.5.3
+
+# CLI bonito
+rich==13.7.0
+click==8.1.7
+
+# Testes
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Análise de código
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+
+# Utilitários
+python-dotenv==1.0.0
+
+# Para futuras integrações com IA (comentado por enquanto)
+# openai==1.6.1
+# langchain==0.1.0
+# anthropic==0.8.1
