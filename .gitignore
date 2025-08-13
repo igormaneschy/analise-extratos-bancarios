@@ -55,6 +55,8 @@ data/output/
 *.xlsx
 *.xls
 *.csv
+*.txt
+*.md
 
 # Exceto samples
 !data/samples/*.pdf

@@ -204,14 +204,19 @@ class PDFStatementReader(StatementReader):
             
             # Parse do valor
             amount = self._parse_amount(amount_match.group(1))
-            
+
             # Determina tipo (débito/crédito)
-            trans_type = TransactionType.DEBIT
-            if 'C' in line or amount > 0 and '-' not in amount_match.group(0):
+            # Verifica se há indicação explícita de C (crédito) ou D (débito)
+            if ' C ' in line or ' C' in line or 'C ' in amount_match.group(0):
                 trans_type = TransactionType.CREDIT
-            elif '-' in amount_match.group(0) or 'D' in line:
+            elif ' D ' in line or ' D' in line or 'D ' in amount_match.group(0):
                 trans_type = TransactionType.DEBIT
-                amount = abs(amount)
+            else:
+                # Se não há indicação explícita, usa o sinal do valor
+                trans_type = TransactionType.DEBIT if amount < 0 else TransactionType.CREDIT
+
+            # Garante que o valor seja sempre positivo
+            amount = abs(amount)
             
             # Extrai descrição (remove data e valor)
             description = line
