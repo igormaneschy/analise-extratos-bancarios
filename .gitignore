@@ -29,6 +29,7 @@ env/
 .venv
 
 # IDEs
+.codellm/
 .vscode/
 .idea/
 *.swp
@@ -42,6 +43,7 @@ htmlcov/
 
 # Logs
 *.log
+*.md
 
 # Dados sensíveis
 .env
@@ -56,7 +58,7 @@ data/output/
 *.xls
 *.csv
 *.txt
-*.md
+
 
 # Exceto samples
 !data/samples/*.pdf

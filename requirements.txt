@@ -16,7 +16,7 @@ click==8.1.7
 rich==13.9.4
 
 # Validação de dados
-pydantic==2.10.3
+pydantic
 
 # Testes
 pytest==8.3.4
@@ -29,3 +29,9 @@ mypy==1.13.0
 
 # Utilitários
 python-dotenv==1.0.1
+
+#RAG MCP
+mcp
+abacusai
+watchdog
+faiss-cpu

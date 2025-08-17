@@ -8,7 +8,6 @@ import click
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich import print as rprint
 
 # Adiciona o diretório raiz ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,16 +32,20 @@ def cli():
 def analyze(file_path, output, format):
     """Analisa um extrato bancário em PDF."""
     try:
-        with console.status("[bold green]Analisando extrato...") as status:
-            analyzer = ExtractAnalyzer()
-            
-            # Se especificou formato markdown, troca o gerador
-            if format == 'markdown':
-                from src.infrastructure.reports.text_report import MarkdownReportGenerator
-                analyzer.use_case.report_generator = MarkdownReportGenerator()
-            
-            result, report = analyzer.analyze_file(file_path, output)
-        
+        analyzer = ExtractAnalyzer()
+
+        # Se especificou formato markdown, troca o gerador
+        if format == 'markdown':
+            from src.infrastructure.reports.text_report import MarkdownReportGenerator
+            analyzer.use_case.report_generator = MarkdownReportGenerator()
+
+        print(f"DEBUG: Iniciando análise do arquivo: {file_path}")
+        result, report = analyzer.analyze_file(file_path, output)
+        print(f"DEBUG: Análise concluída. Total de transações: {result.metadata.get('transaction_count', 0)}")
+        print(f"DEBUG: Receitas: {result.total_income}")
+        print(f"DEBUG: Despesas: {result.total_expenses}")
+        print(f"DEBUG: Saldo: {result.net_flow}")
+
         # Mostra resumo no console
         console.print(Panel.fit(
             f"[bold green]✓ Análise concluída![/bold green]\n\n"
@@ -52,19 +55,19 @@ def analyze(file_path, output, format):
             f"📈 Saldo: € {result.net_flow:,.2f}",
             title="Resumo da Análise"
         ))
-        
+
         # Mostra alertas se houver
         if result.alerts:
             console.print("\n[bold yellow]⚠️  Alertas:[/bold yellow]")
             for alert in result.alerts:
                 console.print(f"  • {alert}")
-        
+
         # Mostra insights
         if result.insights:
             console.print("\n[bold cyan]💡 Insights:[/bold cyan]")
             for insight in result.insights:
                 console.print(f"  • {insight}")
-        
+
         # Salva ou mostra relatório completo
         if output:
             console.print(f"\n[green]✓ Relatório salvo em: {output}[/green]")
@@ -72,7 +75,7 @@ def analyze(file_path, output, format):
             console.print("\n[dim]Use --output para salvar o relatório completo[/dim]")
             if click.confirm("\nDeseja ver o relatório completo?"):
                 console.print("\n" + report)
-                
+
     except FileNotFoundError:
         console.print(f"[bold red]❌ Erro: Arquivo '{file_path}' não encontrado![/bold red]")
         sys.exit(1)

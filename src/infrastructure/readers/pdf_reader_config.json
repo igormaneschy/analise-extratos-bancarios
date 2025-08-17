@@ -1,0 +1,22 @@
+{
+  "currency": "EUR",
+  "credit_pattern": "^\\+?\\d+(?:[.,]\\d+)?$",
+  "debit_pattern": "^-?\\d+(?:[.,]\\d+)?$",
+  "bank_name_patterns": [
+    "Santander",
+    "BBVA",
+    "CaixaBank",
+    "ING",
+    "Deutsche Bank",
+    "BNP Paribas",
+    "Credit Agricole",
+    "UniCredit",
+    "Intesa Sanpaolo",
+    "Banco Sabadell",
+    "Caixa Geral de Depósitos",
+    "Banco Comercial Português",
+    "Millennium BCP",
+    "Banco BPI",
+    "Novo Banco"
+  ]
+}
