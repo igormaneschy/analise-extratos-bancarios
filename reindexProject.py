@@ -6,7 +6,7 @@ from code_indexer import index_code
 # ==========================
 PROJECT_PATH = "./"  # raiz do projeto
 EXTENSIONS = (".py", ".js", ".ts", ".rb", ".java")  # extensões que deseja indexar
-IGNORE_DIRS = {".git", "node_modules", "build", "__pycache__"}  # pastas a ignorar
+IGNORE_DIRS = {".git", "node_modules", "build", "__pycache__", ".venv", "venv"}  # pastas a ignorar
 
 # ==========================
 # Função para reindexar

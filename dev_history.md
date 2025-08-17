@@ -94,6 +94,16 @@ Ação/Tipo: Melhoria
 Descrição: Adição de comandos para monitoramento e gerenciamento do cache no MCP server.
 Detalhes:
 Problema: Não havia forma de monitorar ou gerenciar o cache de buscas pelo MCP.
+
+[2025-08-17] - Assistant
+Arquivos: reindexProject.py
+Ação/Tipo: Correção
+Descrição: Corrigido o problema de indexação do diretório venv (sem ponto).
+Detalhes:
+Problema: O script estava indexando o diretório venv mesmo com .venv na lista de exclusão
+Causa: O nome do diretório era "venv" (sem ponto), mas apenas ".venv" estava na lista de exclusão
+Solução: Adicionado "venv" à lista IGNORE_DIRS para ignorar ambos os formatos
+Observações: Agora o script ignora ambas as variações: .venv e venv
 Causa: Falta de endpoints para operações de cache no MCP server.
 Solução: 1) Adição de método getCacheStats para obter estatísticas do cache. 2) Adição de método clearCache para limpar o cache. 3) Integração com o módulo de cache existente.
 Observações: Agora é possível monitorar e gerenciar o cache de buscas através do MCP server.
