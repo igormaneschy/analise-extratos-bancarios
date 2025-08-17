@@ -59,29 +59,29 @@ def create_sample_statement():
     story.append(Spacer(1, 20))
     
     # Saldo anterior
-    story.append(Paragraph("Saldo Anterior (31/07/2025): R$ 2.500,00", styles['Normal']))
+    story.append(Paragraph("Saldo Anterior (31/07/2025): € 2.500,00", styles['Normal']))
     story.append(Spacer(1, 12))
-    
+
     # Transações
     transactions = [
         ["Data", "Descrição", "Valor", "Saldo"],
-        ["01/08", "SALARIO EMPRESA XYZ", "R$ 5.000,00 C", "R$ 7.500,00"],
-        ["02/08", "PIX ENVIADO MARIA SILVA", "R$ 150,00 D", "R$ 7.350,00"],
-        ["03/08", "SUPERMERCADO EXTRA", "R$ 287,45 D", "R$ 7.062,55"],
-        ["05/08", "FARMACIA POPULAR", "R$ 89,90 D", "R$ 6.972,65"],
-        ["07/08", "UBER TRIP", "R$ 23,50 D", "R$ 6.949,15"],
-        ["08/08", "RESTAURANTE SABOR", "R$ 156,00 D", "R$ 6.793,15"],
-        ["10/08", "CONTA LUZ", "R$ 234,78 D", "R$ 6.558,37"],
-        ["12/08", "NETFLIX.COM", "R$ 39,90 D", "R$ 6.518,47"],
-        ["15/08", "TRANSFERENCIA RECEBIDA", "R$ 500,00 C", "R$ 7.018,47"],
-        ["18/08", "POSTO SHELL", "R$ 200,00 D", "R$ 6.818,47"],
-        ["20/08", "ACADEMIA FITNESS", "R$ 120,00 D", "R$ 6.698,47"],
-        ["22/08", "PIX RECEBIDO PEDRO", "R$ 80,00 C", "R$ 6.778,47"],
-        ["25/08", "SHOPPING CENTER", "R$ 450,00 D", "R$ 6.328,47"],
-        ["28/08", "IFOOD", "R$ 67,80 D", "R$ 6.260,67"],
-        ["30/08", "RENDIMENTO POUPANCA", "R$ 15,43 C", "R$ 6.276,10"],
+        ["01/08", "SALARIO EMPRESA XYZ", "€ 5.000,00 C", "€ 7.500,00"],
+        ["02/08", "PIX ENVIADO MARIA SILVA", "€ 150,00 D", "€ 7.350,00"],
+        ["03/08", "SUPERMERCADO EXTRA", "€ 287,45 D", "€ 7.062,55"],
+        ["05/08", "FARMACIA POPULAR", "€ 89,90 D", "€ 6.972,65"],
+        ["07/08", "UBER TRIP", "€ 23,50 D", "€ 6.949,15"],
+        ["08/08", "RESTAURANTE SABOR", "€ 156,00 D", "€ 6.793,15"],
+        ["10/08", "CONTA LUZ", "€ 234,78 D", "€ 6.558,37"],
+        ["12/08", "NETFLIX.COM", "€ 39,90 D", "€ 6.518,47"],
+        ["15/08", "TRANSFERENCIA RECEBIDA", "€ 500,00 C", "€ 7.018,47"],
+        ["18/08", "POSTO SHELL", "€ 200,00 D", "€ 6.818,47"],
+        ["20/08", "ACADEMIA FITNESS", "€ 120,00 D", "€ 6.698,47"],
+        ["22/08", "PIX RECEBIDO PEDRO", "€ 80,00 C", "€ 6.778,47"],
+        ["25/08", "SHOPPING CENTER", "€ 450,00 D", "€ 6.328,47"],
+        ["28/08", "IFOOD", "€ 67,80 D", "€ 6.260,67"],
+        ["30/08", "RENDIMENTO POUPANCA", "€ 15,43 C", "€ 6.276,10"],
     ]
-    
+
     # Criar tabela de transações
     trans_table = Table(transactions, colWidths=[50, 200, 80, 80])
     trans_table.setStyle(TableStyle([
@@ -91,42 +91,42 @@ def create_sample_statement():
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 10),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        
+
         # Corpo
         ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
         ('FONTSIZE', (0, 1), (-1, -1), 9),
         ('ALIGN', (0, 1), (0, -1), 'CENTER'),
         ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
-        
+
         # Linhas alternadas
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-        
+
         # Bordas
         ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
     ]))
-    
+
     story.append(trans_table)
     story.append(Spacer(1, 20))
-    
+
     # Resumo
     story.append(Paragraph("RESUMO DO PERÍODO", styles['Heading3']))
     story.append(Spacer(1, 12))
-    
+
     summary_data = [
-        ["Total de Créditos:", "R$ 5.595,43"],
-        ["Total de Débitos:", "R$ 1.819,33"],
-        ["Saldo Final:", "R$ 6.276,10"]
+        ["Total de Créditos:", "€ 5.595,43"],
+        ["Total de Débitos:", "€ 1.819,33"],
+        ["Saldo Final:", "€ 6.276,10"]
     ]
-    
+
     summary_table = Table(summary_data, colWidths=[150, 100])
     summary_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
         ('FONTSIZE', (0, 0), (-1, -1), 10),
     ]))
-    
+
     story.append(summary_table)
-    
+
     # Gerar PDF
     doc.build(story)
     print(f"✅ PDF de exemplo criado: {filename}")

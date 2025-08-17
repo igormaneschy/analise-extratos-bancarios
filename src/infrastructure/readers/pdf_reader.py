@@ -22,11 +22,12 @@ class PDFStatementReader(StatementReader):
             r'(\d{2})-(\d{2})-(\d{4})',  # DD-MM-YYYY
             r'(\d{2})/(\d{2})',           # DD/MM (ano atual)
         ]
-        
+
+        # Alterar os padrões para reconhecer R$ e €
         self.amount_patterns = [
-            r'R\$\s*([\d.,]+)',           # R$ 1.234,56
-            r'([\d.,]+)\s*[CD]',          # 1.234,56 C ou D
-            r'([-]?[\d.,]+)',             # -1.234,56 ou 1.234,56
+            r'(?:R\$|€)\s*([\d.,]+)',           # R$ 1.234,56 ou € 1.234,56
+            r'([\d.,]+)\s*[CD]',                  # 1.234,56 C ou D
+            r'([-]?[\d.,]+)',                     # -1.234,56 ou 1.234,56
         ]
     
     def can_read(self, file_path: Path) -> bool:
@@ -235,14 +236,11 @@ class PDFStatementReader(StatementReader):
             return None
     
     def _parse_amount(self, amount_str: str) -> Decimal:
-        """Converte string de valor para Decimal."""
-        # Remove espaços e R$
-        amount_str = amount_str.strip().replace('R$', '').replace(' ', '')
-        
-        # Troca vírgula por ponto
-        amount_str = amount_str.replace('.', '').replace(',', '.')
-        
+        # Remove espaços e símbolos de moeda
+        amount_str = amount_str.strip().replace('R$', '').replace('€', '').replace(' ', '')
+        # Remove pontos de milhar e troca vírgula por ponto para decimal
+        normalized = amount_str.replace('.', '').replace(',', '.')
         try:
-            return Decimal(amount_str)
+            return Decimal(normalized)
         except:
             return Decimal('0.00')

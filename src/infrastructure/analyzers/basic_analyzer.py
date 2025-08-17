@@ -42,7 +42,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             insights=insights,
             metadata={
                 'transaction_count': statement.transaction_count,
-                'period_days': (statement.period_end - statement.period_start).days
+                'period_days': (statement.period_end - statement.period_start).days if statement.period_end and statement.period_start else 0
             }
         )
     
@@ -131,7 +131,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             )
         
         # Insight sobre média diária de gastos
-        if statement.period_end > statement.period_start:
+        if statement.period_end is not None and statement.period_start is not None and statement.period_end > statement.period_start:
             days = (statement.period_end - statement.period_start).days
             if days > 0:
                 daily_avg = statement.total_expenses / days
@@ -153,8 +153,10 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             )
         
         # Insight sobre frequência de transações
-        if statement.transaction_count > 0 and statement.period_end > statement.period_start:
-            days = (statement.period_end - statement.period_start).days
+        if (statement.transaction_count > 0 and
+            statement.period_end and statement.period_start and
+            statement.period_end > statement.period_start):
+            days = (statement.period_end - statement.period_start).days if statement.period_end and statement.period_start else 0
             if days > 0:
                 trans_per_day = statement.transaction_count / days
                 insights.append(

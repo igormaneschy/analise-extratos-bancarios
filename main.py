@@ -47,9 +47,9 @@ def analyze(file_path, output, format):
         console.print(Panel.fit(
             f"[bold green]✓ Análise concluída![/bold green]\n\n"
             f"📊 Total de transações: {result.metadata.get('transaction_count', 0)}\n"
-            f"💰 Receitas: R$ {result.total_income:,.2f}\n"
-            f"💸 Despesas: R$ {result.total_expenses:,.2f}\n"
-            f"📈 Saldo: R$ {result.net_flow:,.2f}",
+            f"💰 Receitas: € {result.total_income:,.2f}\n"
+            f"💸 Despesas: € {result.total_expenses:,.2f}\n"
+            f"📈 Saldo: € {result.net_flow:,.2f}",
             title="Resumo da Análise"
         ))
         
