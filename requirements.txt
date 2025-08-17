@@ -35,3 +35,7 @@ mcp
 abacusai
 watchdog
 faiss-cpu
+
+# Embeddings e modelos
+sentence-transformers==3.0.1
+torch==2.4.0
