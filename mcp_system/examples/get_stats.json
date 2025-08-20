@@ -1,0 +1,24 @@
+{
+  "name": "get_stats",
+  "description": "Obtém estatísticas do sistema de indexação",
+  "request": {
+    "jsonrpc": "2.0",
+    "method": "get_stats",
+    "params": {},
+    "id": 3
+  },
+  "expected_response": {
+    "status": "success",
+    "stats": {
+      "total_files": 150,
+      "total_chunks": 1250,
+      "index_size_mb": 2.3,
+      "last_indexed": "2025-08-20T10:30:00Z",
+      "capabilities": {
+        "semantic_search": true,
+        "auto_indexing": true,
+        "fastmcp": true
+      }
+    }
+  }
+}

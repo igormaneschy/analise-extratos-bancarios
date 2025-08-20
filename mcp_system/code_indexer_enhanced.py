@@ -1,9 +1,23 @@
 # code_indexer_enhanced.py
 # Sistema MCP melhorado com busca híbrida, auto-indexação e cache inteligente
 from __future__ import annotations
-import os, re, json, math, time, hashlib, threading
+import os, re, json, math, time, hashlib, threading, csv, datetime as dt
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
+
+#logs para métricas
+
+METRICS_PATH = os.environ.get("MCP_METRICS_FILE", ".mcp_index/metrics.csv")
+
+def _log_metrics(row: dict):
+    """Append de uma linha de métricas em CSV."""
+    os.makedirs(os.path.dirname(METRICS_PATH), exist_ok=True)
+    file_exists = os.path.exists(METRICS_PATH)
+    with open(METRICS_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=row.keys())
+        if not file_exists:
+            w.writeheader()
+        w.writerow(row)
 
 # Tenta importar recursos avançados
 HAS_ENHANCED_FEATURES = True
@@ -372,12 +386,20 @@ def build_context_pack(
         ]
       }
     """
+    t0 = time.perf_counter()  # <-- start para medir latência
+
     q_tokens = tokenize(query)
     search_res = search_code(indexer, query, top_k=max_chunks * 3)
     ordered_ids = [r["chunk_id"] for r in search_res]
 
     if strategy == "mmr":
-        ordered_ids = _mmr_select(indexer, ordered_ids, q_tokens, k=min(max_chunks, len(ordered_ids)), lambda_diverse=0.7)
+        ordered_ids = _mmr_select(
+            indexer,
+            ordered_ids,
+            q_tokens,
+            k=min(max_chunks, len(ordered_ids)),
+            lambda_diverse=0.7,
+        )
     else:
         ordered_ids = ordered_ids[:max_chunks]
 
@@ -416,7 +438,23 @@ def build_context_pack(
         if len(pack["chunks"]) >= max_chunks or remaining <= 0:
             break
 
+    # --- LOG MÉTRICAS CSV ---
+    try:
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        _log_metrics({
+            "ts": dt.datetime.utcnow().isoformat(timespec="seconds"),
+            "query": query[:160],
+            "chunk_count": len(pack["chunks"]),
+            "total_tokens": pack["total_tokens"],
+            "budget_tokens": budget_tokens,
+            "budget_utilization": round(pack["total_tokens"] / max(1, budget_tokens), 3),
+            "latency_ms": latency_ms,
+        })
+    except Exception:
+        pass  # não quebra o fluxo se log falhar
+
     return pack
+
 
 # ========== INDEXADOR MELHORADO ==========
 
