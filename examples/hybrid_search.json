@@ -1,0 +1,35 @@
+{
+  "name": "hybrid_search",
+  "description": "Busca híbrida BM25 + semântica com controle de peso",
+  "request": {
+    "jsonrpc": "2.0",
+    "method": "search_code",
+    "params": {
+      "query": "autenticação de usuário com JWT token",
+      "top_k": 10,
+      "use_semantic": true,
+      "semantic_weight": 0.4,
+      "filters": {
+        "file_type": "python"
+      }
+    },
+    "id": 2
+  },
+  "expected_response": {
+    "results": [
+      {
+        "chunk_id": "auth_service_py_123",
+        "score": 0.87,
+        "bm25_score": 0.65,
+        "semantic_score": 0.89,
+        "file_path": "src/auth/service.py",
+        "content": "def authenticate_user(token: str) -> User:...",
+        "start_line": 25,
+        "end_line": 45
+      }
+    ],
+    "search_type": "hybrid",
+    "semantic_weight": 0.4,
+    "total_results": 10
+  }
+}

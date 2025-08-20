@@ -25,36 +25,32 @@ class EmbeddingModel:
         """Carrega o modelo de embeddings"""
         try:
             self.model = SentenceTransformer(self.model_name)
-            print(f"[EMBEDDING] Modelo {self.model_name} carregado com sucesso")
-        except Exception as e:
-            print(f"[EMBEDDING] Erro ao carregar modelo {self.model_name}: {e}")
+            # Removendo todas as mensagens de impressão que podem interferir no parsing JSON
+        except Exception:
             # Fallback para modelo mais simples
             try:
                 self.model = SentenceTransformer("all-MiniLM-L6-v2")
-                print(f"[EMBEDDING] Modelo fallback carregado com sucesso")
-            except Exception as e2:
-                print(f"[EMBEDDING] Erro ao carregar modelo fallback: {e2}")
+            except Exception:
                 self.model = None
     
     def embed_text(self, text: str) -> np.ndarray:
         """
         Gera embedding para um texto.
-        
+
         Args:
             text: Texto para gerar embedding
-            
+
         Returns:
             Array numpy com o embedding
         """
         if self.model is None:
             # Retorna embedding aleatório se modelo não estiver disponível
             return np.random.rand(384).astype(np.float32)
-        
+
         try:
             embedding = self.model.encode(text)
             return np.array(embedding, dtype=np.float32)
-        except Exception as e:
-            print(f"[EMBEDDING] Erro ao gerar embedding: {e}")
+        except Exception:
             # Retorna embedding aleatório em caso de erro
             return np.random.rand(384).astype(np.float32)
     

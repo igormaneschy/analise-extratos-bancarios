@@ -31,51 +31,37 @@ class DevHistoryManager:
         try:
             with open(history_path, "r", encoding="utf-8") as f:
                 content = f.read()
-                
-            # Verifica se o hash da entrada já existe no arquivo
-            # Usamos uma marcação especial para identificar hashes
-            hash_marker = f"<!-- HASH:{entry_hash} -->"
-            return hash_marker in content
+                return f"<!-- HASH:{entry_hash} -->" in content
         except Exception:
             return False
     
-    def update_history(self, file_path: str, action_type: str, 
-                      description: str = "Atualização automática do código.",
+    def update_history(self, file_path: str, action_type: str, description: str, 
                       details: Optional[Dict[str, str]] = None) -> bool:
         """
-        Atualiza o arquivo dev_history.md com as alterações feitas no código.
+        Atualiza o arquivo dev_history.md com uma nova entrada.
         
         Args:
             file_path: Caminho do arquivo modificado
             action_type: Tipo de ação (Correção, Melhoria, Refatoração, etc.)
-            description: Descrição da alteração
-            details: Detalhes da alteração (problema, causa, solução, observações)
+            description: Descrição breve da alteração
+            details: Detalhes adicionais (opcional)
             
         Returns:
-            bool: True se a atualização foi bem-sucedida, False caso contrário
+            bool: True se a entrada foi adicionada, False se já existia
         """
+        if details is None:
+            details = {
+                "Problema": "Atualização automática do código",
+                "Causa": "Modificação detectada pelo MCP",
+                "Solução": "Atualização automática do histórico",
+                "Observações": "Entrada gerada automaticamente"
+            }
+        
         try:
-            # Get relative path from project root
             rel_path = os.path.relpath(file_path, self.project_root)
+            date_str = datetime.now().strftime("%Y-%m-%d")
             
-            # Skip if it's in ignored directories
-            if any(ignored in rel_path.split(os.sep) for ignored in self.ignored_dirs):
-                return False
-                
-            # Get current date
-            current_date = datetime.now().strftime("%Y-%m-%d")
-            
-            # Default details if not provided
-            if details is None:
-                details = {
-                    "Problema": "Código modificado mas histórico de desenvolvimento não foi atualizado automaticamente.",
-                    "Causa": "Falta de integração entre o MCP e o registro automático de histórico.",
-                    "Solução": "Implementação de função para atualizar dev_history.md automaticamente quando arquivos são modificados.",
-                    "Observações": "Esta entrada foi gerada automaticamente pelo sistema MCP."
-                }
-            
-            # Create dev history entry
-            entry = f"""[{current_date}] - Assistant
+            entry = f"""[{date_str}] - Assistant
 Arquivos: {rel_path}
 Ação/Tipo: {action_type}
 Descrição: {description}
@@ -100,10 +86,10 @@ Observações: {details["Observações"]}
             with open(history_path, "a", encoding="utf-8") as f:
                 f.write(entry_with_hash)
                 
-            print(f"[MCP] dev_history.md atualizado com alterações em {rel_path}")
+            # Removendo todas as mensagens de impressão que podem interferir no parsing JSON
             return True
         except Exception as e:
-            print(f"[MCP] Falha ao atualizar dev_history.md: {e}")
+            # Removendo todas as mensagens de impressão que podem interferir no parsing JSON
             return False
     
     def should_track_file(self, file_path: str) -> bool:
