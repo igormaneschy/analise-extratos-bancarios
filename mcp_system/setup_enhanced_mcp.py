@@ -159,11 +159,11 @@ def setup_mcp_config() -> bool:
 def initial_indexing() -> bool:
     """Executa indexação inicial do projeto"""
     print_header("Indexação Inicial do Projeto")
-    
+
     try:
         # Importa indexador melhorado
-        from code_indexer_enhanced import EnhancedCodeIndexer
-        
+        from mcp_system import EnhancedCodeIndexer
+
         print_step("Iniciando indexador melhorado")
         indexer = EnhancedCodeIndexer(
             index_dir=".mcp_index",
@@ -171,29 +171,37 @@ def initial_indexing() -> bool:
             enable_semantic=True,
             enable_auto_indexing=False  # Não inicia watcher ainda
         )
-        
+
         # Indexa projeto atual
         print_step("Indexando arquivos do projeto...")
         result = indexer.index_files(["."])
-        
+
         files_indexed = result.get('files_indexed', 0)
         chunks_created = result.get('chunks', 0)
-        
+
         print_step(f"Indexados {files_indexed} arquivos, {chunks_created} chunks", "ok")
-        
+
         # Testa busca
         print_step("Testando busca...")
         search_results = indexer.search_code("função main", top_k=3)
         print_step(f"Busca retornou {len(search_results)} resultados", "ok")
-        
+
         return True
-        
+
     except ImportError:
-        print_step("Indexador melhorado não disponível, usando versão base", "warn")
+        print_step("Indexador melhorado não disponível, usando versão base integrada", "warn")
         try:
-            from code_indexer_patched import CodeIndexer
-            indexer = CodeIndexer(index_dir=".mcp_index", repo_root=".")
-            # Indexação básica...
+            from mcp_system import BaseCodeIndexer, index_repo_paths
+            indexer = BaseCodeIndexer(index_dir=".mcp_index", repo_root=".")
+
+            # Indexação básica usando função integrada
+            print_step("Indexando com versão base...")
+            result = index_repo_paths(indexer, ["."])
+
+            files_indexed = result.get('files_indexed', 0)
+            chunks_created = result.get('chunks', 0)
+
+            print_step(f"Indexados {files_indexed} arquivos, {chunks_created} chunks", "ok")
             return True
         except Exception as e:
             print_step(f"Erro na indexação: {e}", "error")
@@ -245,8 +253,8 @@ def show_usage_guide():
 
 2️⃣ Via Python:
    ```python
-   from code_indexer_enhanced import EnhancedCodeIndexer
-   
+   from mcp_system import EnhancedCodeIndexer
+
    indexer = EnhancedCodeIndexer()
    results = indexer.search_code("sua consulta")
    context = indexer.build_context_pack("sua consulta", budget_tokens=3000)

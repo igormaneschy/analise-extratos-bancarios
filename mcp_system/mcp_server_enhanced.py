@@ -26,22 +26,35 @@ except ImportError:
 # Importa funcionalidades melhoradas
 try:
     from code_indexer_enhanced import (
-        EnhancedCodeIndexer, 
+        EnhancedCodeIndexer,
         enhanced_search_code,
         enhanced_build_context_pack,
-        enhanced_index_repo_paths
-    )
-    HAS_ENHANCED_FEATURES = True
-except ImportError:
-    # Fallback para versão original
-    sys.stderr.write("[mcp_server_enhanced] WARN: Recursos avançados não disponíveis, usando versão base.\n")
-    from code_indexer_patched import (
-        CodeIndexer,
-        index_repo_paths,
+        enhanced_index_repo_paths,
+        BaseCodeIndexer,
         search_code,
         build_context_pack,
+        index_repo_paths
     )
-    HAS_ENHANCED_FEATURES = False
+    HAS_ENHANCED = True
+    sys.stderr.write("[mcp_server_enhanced] ✅ Funcionalidades melhoradas carregadas\n")
+except ImportError as e:
+    sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Funcionalidades melhoradas não disponíveis: {e}\n")
+    sys.stderr.write("[mcp_server_enhanced] 🔄 Usando versão base integrada\n")
+
+    # Fallback para versão base integrada
+    try:
+        from code_indexer_enhanced import (
+            BaseCodeIndexer,
+            search_code,
+            build_context_pack,
+            index_repo_paths
+        )
+        HAS_ENHANCED = False
+    except ImportError as e2:
+        sys.stderr.write(f"[mcp_server_enhanced] ❌ Erro crítico: {e2}\n")
+        raise
+
+HAS_ENHANCED_FEATURES = HAS_ENHANCED
 
 # Config / instâncias
 INDEX_DIR = os.environ.get("INDEX_DIR", ".mcp_index")
@@ -53,7 +66,7 @@ if HAS_ENHANCED_FEATURES:
         repo_root=INDEX_ROOT
     )
 else:
-    _indexer = CodeIndexer(index_dir=INDEX_DIR)
+    _indexer = BaseCodeIndexer(index_dir=INDEX_DIR)
 
 # ===== HANDLERS IMPLEMENTATION =====
 

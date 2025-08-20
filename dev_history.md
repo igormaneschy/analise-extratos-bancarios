@@ -8,12 +8,56 @@ Causa: Falta de automação no processo de preparação do ambiente do agente.
 Solução: Criação de script dedicado que verifica e configura todas as ferramentas necessárias do agente.
 Observações: O script verifica servidor MCP, cache, indexação e mostra comandos úteis.
 
-[2025-08-19] - Assistant
-Arquivos: scripts/check_mcp_integration.py
-Ação/Tipo: Melhoria
-Descrição: Criação do script para verificar a integração com o servidor MCP.
+[2025-01-27] - Assistant
+Arquivos: code_indexer_enhanced.py, mcp_server_enhanced.py, scripts/setup_enhanced_mcp.py
+
+[2025-01-27] - Assistant
+Arquivos: mcp_system/, src/, scripts/setup_enhanced_mcp.py, .vscode/mcp.json, docs/mcp_system.md, README.md
+Ação/Tipo: Refatoração
+Descrição: Reorganização completa da estrutura do projeto - separação clara entre domínio da aplicação (src/) e sistema MCP (mcp_system/).
 Detalhes:
-Problema: Não havia uma forma automatizada de verificar se a integração com o servidor MCP estava funcionando corretamente.
+Problema: Arquivos do sistema MCP estavam misturados com código do domínio da aplicação, criando confusão sobre responsabilidades.
+Causa: Durante o desenvolvimento do MCP, arquivos auxiliares foram colocados dentro da pasta src/ que deveria conter apenas código da aplicação principal.
+Solução: Criou pasta mcp_system/ dedicada com estrutura organizada (embeddings/, utils/, cache/). Moveu todos os arquivos MCP para lá e atualizou importações em scripts, configurações e documentação.
+
+[2025-01-27] - Assistant
+Arquivos: README.md, mcp_system/, docs/, examples/, scripts/, requirements_enhanced.txt, enhancement_plan.md
+Ação/Tipo: Refatoração
+Descrição: Limpeza completa - remoção de todas as referências ao MCP do projeto principal e consolidação total na pasta mcp_system/.
+Detalhes:
+Problema: Ainda existiam arquivos e referências ao MCP espalhados pelo projeto, confundindo o objetivo principal.
+Causa: Arquivos específicos do MCP (examples/, docs/mcp_system.md, requirements_enhanced.txt, etc.) estavam fora da pasta dedicada.
+Solução: Moveu TODOS os arquivos MCP para mcp_system/, reescreveu README focado apenas em análise de extratos, criou README específico do MCP. Projeto agora tem separação cristalina.
+Observações: README principal 100% focado na aplicação. Sistema MCP completamente autocontido em sua pasta com documentação própria.
+Observações: Estrutura agora clara - src/ para análise de extratos, mcp_system/ para ferramentas de desenvolvimento. Sistema testado e funcionando.
+
+Ação/Tipo: Refatoração
+Descrição: Consolidação completa das funcionalidades base no code_indexer_enhanced.py, eliminando dependência do code_indexer_patched.py.
+Detalhes:
+Problema: O sistema dependia do code_indexer_patched.py como fallback e para funcionalidades base, criando duplicação de código e depedências desnecessárias.
+Causa: Arquitetura inicial que separava funcionalidades base das melhoradas em arquivos diferentes.
+Solução: Moveu todas as funcionalidades base (BaseCodeIndexer, funções de busca BM25, construção de contexto) para dentro do code_indexer_enhanced.py, mantendo compatibilidade total com a API existente.
+
+[2025-01-27] - Assistant
+Arquivos: README.md, docs/mcp_system.md
+Ação/Tipo: Documentação
+Descrição: Reorganização da documentação - README focado no objetivo principal (análise de extratos) e MCP documentado separadamente.
+Detalhes:
+Problema: README estava focado incorretamente no sistema MCP como objetivo principal, quando na verdade é uma ferramenta de desenvolvimento.
+Causa: Durante o desenvolvimento do MCP, a documentação foi reescrita priorizando o sistema auxiliar ao invés do objetivo principal do projeto.
+Solução: Restaurou README com foco correto em análise de extratos bancários, mencionando MCP como ferramenta de desenvolvimento. Criou docs/mcp_system.md com documentação técnica completa do sistema MCP.
+Observações: Agora a documentação está corretamente organizada - README para usuários finais, docs/mcp_system.md para desenvolvedores.
+Observações: Agora o code_indexer_patched.py pode ser removido com segurança. Todos os testes passaram e o servidor MCP funciona normalmente.
+
+[2025-08-19] - Assistant
+Arquivos: scripts/setup_agent_context.py
+Ação/Tipo: Melhoria
+Descrição: Criação do script para configurar automaticamente o contexto do agente.
+Detalhes:
+Problema: Não havia um mecanismo centralizado para configurar o contexto do agente antes de iniciar tarefas.
+Causa: Falta de automação no processo de preparação do ambiente do agente.
+Solução: Criação de script dedicado que verifica e configura todas as ferramentas necessárias do agente.
+Observações: O script verifica servidor MCP, cache, indexação e mostra comandos úteis.
 Causa: Falta de ferramentas de diagnóstico para a integração MCP.
 Solução: Implementação de script que verifica conexão com o servidor, arquivos de configuração, regras e integração com histórico.
 Observações: O script fornece feedback detalhado sobre o estado da integração MCP.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 CLI principal para análise de extratos bancários.
+
+
 """
 import sys
 from pathlib import Path
