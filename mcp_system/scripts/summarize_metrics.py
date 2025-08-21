@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Resumo de métricas do MCP (context_pack) a partir de .mcp_index/metrics.csv
+Resumo de métricas do MCP (context_pack) a partir de mcp_system/.mcp_index/metrics.csv
 
 Campos esperados no CSV:
   ts, query, chunk_count, total_tokens, budget_tokens, budget_utilization, latency_ms
 
 Uso básico:
   python summarize_metrics.py
-  python summarize_metrics.py --file .mcp_index/metrics.csv
+  python summarize_metrics.py --file mcp_system/.mcp_index/metrics.csv
   python summarize_metrics.py --since 7
   python summarize_metrics.py --filter "minha funcao"
   python summarize_metrics.py --json
@@ -30,167 +30,201 @@ def p95(vals: List[float]) -> float:
 def coerce_int(s, default=0):
     try:
         return int(s)
-    except Exception:
+    except (ValueError, TypeError):
+        return default
+
+def coerce_float(s, default=0.0):
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
+def parse_dt(s):
+    if not s:
+        return None
+    # Tentar diferentes formatos de data
+    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"]:
         try:
-            return int(float(s))
-        except Exception:
-            return default
+            if fmt.endswith("%z"):
+                return dt.datetime.strptime(s, fmt)
+            else:
+                return dt.datetime.strptime(s, fmt).replace(tzinfo=dt.timezone.utc)
+        except ValueError:
+            continue
+    return None
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Resumo de métricas do MCP (CSV).")
-    parser.add_argument("--file", "-f", default=os.environ.get("MCP_METRICS_FILE", ".mcp_index/metrics.csv"),
-                        help="Caminho do CSV (default: .mcp_index/metrics.csv ou $MCP_METRICS_FILE)")
-    parser.add_argument("--since", type=int, default=None,
-                        help="Somente últimos N dias (ex.: --since 7)")
-    parser.add_argument("--filter", type=str, default=None,
-                        help="Filtra linhas cujo 'query' contém este texto (case-insensitive)")
-    parser.add_argument("--json", action="store_true",
-                        help="Imprime JSON ao invés de tabela")
-    return parser.parse_args()
-
-def load_rows(path: str) -> List[Dict[str, Any]]:
+def load_csv(path: str) -> List[Dict[str, Any]]:
     if not os.path.exists(path):
-        print(f"[erro] CSV não encontrado: {path}", file=sys.stderr)
+        print(f"[erro] CSV não encontrado: {path}")
         sys.exit(1)
-    with open(path, encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    if not rows:
-        print("[aviso] CSV está vazio.", file=sys.stderr)
+    
+    with open(path) as f:
+        # Detectar se é o arquivo de métricas de indexação ou de context pack
+        first_line = f.readline()
+        f.seek(0)
+        
+        if "query" in first_line:
+            # Arquivo de métricas de context pack
+            reader = csv.DictReader(f)
+            return [row for row in reader]
+        else:
+            # Arquivo de métricas de indexação - converter para o formato esperado
+            reader = csv.DictReader(f)
+            converted_rows = []
+            
+            for row in reader:
+                # Converter métricas de indexação para o formato de context pack
+                converted_row = {
+                    "ts": row.get("ts", ""),
+                    "query": f"index_{row.get('op', 'unknown')}",
+                    "chunk_count": str(coerce_int(row.get("chunks", 0))),
+                    "total_tokens": str(coerce_int(row.get("chunks", 0)) * 50),  # Estimativa de tokens
+                    "budget_tokens": "8000",  # Valor padrão
+                    "budget_utilization": str(coerce_float(row.get("chunks", 0)) * 50 / 8000 * 100),  # Estimativa
+                    "latency_ms": str(coerce_float(row.get("elapsed_s", 0)) * 1000)
+                }
+                converted_rows.append(converted_row)
+            
+            return converted_rows
+
+def filter_rows(rows: List[Dict], since_days: int = 0, query_filter: str = "") -> List[Dict]:
+    if since_days > 0:
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=since_days)
+        rows = [r for r in rows if parse_dt(r["ts"]) and parse_dt(r["ts"]) >= cutoff]
+    
+    if query_filter:
+        rows = [r for r in rows if query_filter.lower() in r["query"].lower()]
+    
     return rows
 
-def within_since(ts_iso: str, since_days: int) -> bool:
-    try:
-        # suporta 'YYYY-MM-DDTHH:MM:SS' (com/sem timezone)
-        d = dt.datetime.fromisoformat(ts_iso.replace("Z",""))
-    except Exception:
-        return True  # se não der pra parsear, não filtra
-    return (dt.datetime.utcnow() - d) <= dt.timedelta(days=since_days)
+def format_dt(d: dt.datetime) -> str:
+    return d.strftime("%Y-%m-%d")
 
-def summarize(rows: List[Dict[str, Any]], args):
-    # filtros
-    if args.since is not None:
-        rows = [r for r in rows if within_since(r.get("ts",""), args.since)]
-    if args.filter:
-        q = args.filter.lower()
-        rows = [r for r in rows if q in (r.get("query","").lower())]
-
+def summarize(rows: List[Dict], args):
     if not rows:
-        return {"overall": {}, "daily": []}
-
-    # agrega por dia (YYYY-MM-DD)
-    by_day: Dict[str, List[Dict[str, Any]]] = {}
-    for r in rows:
-        ts = r.get("ts","")
-        day = ts[:10] if len(ts) >= 10 else "unknown"
-        by_day.setdefault(day, []).append(r)
-
-    # funções helpers
-    def stats_for(values: List[float]) -> Dict[str, float]:
-        if not values:
-            return {"avg":0.0, "med":0.0, "p95":0.0, "min":0.0, "max":0.0}
-        return {
-            "avg": round(sum(values)/len(values), 2),
-            "med": round(st.median(values), 2),
-            "p95": round(p95(values), 2),
-            "min": round(min(values), 2),
-            "max": round(max(values), 2),
-        }
-
-    # diário
-    daily = []
-    all_tokens = []
-    all_lat = []
-    all_chunks = []
-    period_start = None
-    period_end = None
-
-    for day in sorted(by_day.keys()):
-        rs = by_day[day]
-        toks = [coerce_int(r.get("total_tokens",0)) for r in rs]
-        lat = [coerce_int(r.get("latency_ms",0)) for r in rs]
-        chs = [coerce_int(r.get("chunk_count",0)) for r in rs]
-        util = []
-        for r in rs:
-            try:
-                util.append(float(r.get("budget_utilization", 0)))
-            except Exception:
-                pass
-
-        all_tokens.extend(toks)
-        all_lat.extend(lat)
-        all_chunks.extend(chs)
-
-        if period_start is None:
-            try:
-                period_start = day
-            except Exception:
-                pass
-        period_end = day
-
-        daily.append({
-            "day": day,
-            "n": len(rs),
-            "tokens": stats_for(toks),
-            "latency_ms": stats_for(lat),
-            "chunk_count_avg": round(sum(chs)/len(chs), 2) if chs else 0.0,
-            "budget_util_avg": round(sum(util)/len(util), 3) if util else 0.0,
-        })
-
-    overall = {
-        "period": {"start": period_start, "end": period_end},
-        "n": len(rows),
-        "tokens": {
-            "avg": round(sum(all_tokens)/len(all_tokens), 2) if all_tokens else 0.0,
-            "med": round(st.median(all_tokens), 2) if all_tokens else 0.0,
-            "p95": round(p95(all_tokens), 2) if all_tokens else 0.0,
-            "min": min(all_tokens) if all_tokens else 0,
-            "max": max(all_tokens) if all_tokens else 0,
-            "sum": int(sum(all_tokens)) if all_tokens else 0,
-        },
-        "latency_ms": {
-            "avg": round(sum(all_lat)/len(all_lat), 2) if all_lat else 0.0,
-            "med": round(st.median(all_lat), 2) if all_lat else 0.0,
-            "p95": round(p95(all_lat), 2) if all_lat else 0.0,
-            "min": min(all_lat) if all_lat else 0,
-            "max": max(all_lat) if all_lat else 0,
-        },
-        "chunk_count_avg": round(sum(all_chunks)/len(all_chunks), 2) if all_chunks else 0.0,
-    }
-
-    return {"overall": overall, "daily": daily}
-
-def print_table(summary: Dict[str, Any]):
-    overall = summary.get("overall", {})
-    daily = summary.get("daily", [])
-
-    print("\n=== OVERALL ===")
-    if not overall:
-        print("sem dados após filtros.")
+        print("Nenhum dado encontrado.")
         return
 
-    per = overall["period"]
-    print(f"Período: {per.get('start','?')} → {per.get('end','?')}")
-    print(f"N linhas: {overall['n']}")
-    print(f"Tokens  | avg: {overall['tokens']['avg']}, med: {overall['tokens']['med']}, p95: {overall['tokens']['p95']}, sum: {overall['tokens']['sum']}")
-    print(f"Lat(ms) | avg: {overall['latency_ms']['avg']}, med: {overall['latency_ms']['med']}, p95: {overall['latency_ms']['p95']}")
-    print(f"Chunk count médio: {overall['chunk_count_avg']}")
-    print("\n=== DAILY ===")
-    print(f"{'day':<12} {'n':>4}  {'tok_avg':>8} {'tok_med':>8} {'tok_p95':>8}   {'lat_avg':>8} {'lat_p95':>8}   {'chunks_avg':>10} {'budget_u_avg':>12}")
-    for d in daily:
-        print(f"{d['day']:<12} {d['n']:>4}  "
-              f"{d['tokens']['avg']:>8} {d['tokens']['med']:>8} {d['tokens']['p95']:>8}   "
-              f"{d['latency_ms']['avg']:>8} {d['latency_ms']['p95']:>8}   "
-              f"{d['chunk_count_avg']:>10} {d['budget_util_avg']:>12}")
+    # Resumo geral
+    total_rows = len(rows)
+    first_ts = min(parse_dt(r["ts"]) for r in rows if parse_dt(r["ts"]))
+    last_ts = max(parse_dt(r["ts"]) for r in rows if parse_dt(r["ts"]))
+    
+    # Converter valores para números
+    chunk_counts = [coerce_int(r["chunk_count"]) for r in rows]
+    total_tokens_list = [coerce_int(r["total_tokens"]) for r in rows]
+    budget_utilizations = [coerce_float(r["budget_utilization"]) for r in rows]
+    latencies = [coerce_float(r["latency_ms"]) for r in rows]
+    
+    # Calcular estatísticas
+    avg_chunks = st.mean(chunk_counts) if chunk_counts else 0
+    avg_tokens = st.mean(total_tokens_list) if total_tokens_list else 0
+    avg_util = st.mean(budget_utilizations) if budget_utilizations else 0
+    avg_latency = st.mean(latencies) if latencies else 0
+    
+    p95_chunks = p95(chunk_counts)
+    p95_tokens = p95(total_tokens_list)
+    p95_util = p95(budget_utilizations)
+    p95_latency = p95(latencies)
+    
+    # Agrupar por dia
+    daily_stats = {}
+    for row in rows:
+        ts = parse_dt(row["ts"])
+        if not ts:
+            continue
+        day = format_dt(ts)
+        if day not in daily_stats:
+            daily_stats[day] = {
+                "chunk_counts": [],
+                "total_tokens": [],
+                "budget_utilizations": [],
+                "latencies": []
+            }
+        daily_stats[day]["chunk_counts"].append(coerce_int(row["chunk_count"]))
+        daily_stats[day]["total_tokens"].append(coerce_int(row["total_tokens"]))
+        daily_stats[day]["budget_utilizations"].append(coerce_float(row["budget_utilization"]))
+        daily_stats[day]["latencies"].append(coerce_float(row["latency_ms"]))
+    
+    # Converter para formato de tabela
+    daily_rows = []
+    for day, stats in sorted(daily_stats.items()):
+        daily_rows.append({
+            "day": day,
+            "avg_chunks": st.mean(stats["chunk_counts"]) if stats["chunk_counts"] else 0,
+            "median_chunks": st.median(stats["chunk_counts"]) if stats["chunk_counts"] else 0,
+            "p95_chunks": p95(stats["chunk_counts"]),
+            "avg_tokens": st.mean(stats["total_tokens"]) if stats["total_tokens"] else 0,
+            "median_tokens": st.median(stats["total_tokens"]) if stats["total_tokens"] else 0,
+            "p95_tokens": p95(stats["total_tokens"]),
+            "avg_util": st.mean(stats["budget_utilizations"]) if stats["budget_utilizations"] else 0,
+            "median_util": st.median(stats["budget_utilizations"]) if stats["budget_utilizations"] else 0,
+            "p95_util": p95(stats["budget_utilizations"]),
+            "avg_latency": st.mean(stats["latencies"]) if stats["latencies"] else 0,
+            "median_latency": st.median(stats["latencies"]) if stats["latencies"] else 0,
+            "p95_latency": p95(stats["latencies"]),
+        })
+    
+    # Saída JSON se solicitado
+    if args.json:
+        output = {
+            "summary": {
+                "period_start": format_dt(first_ts) if first_ts else "",
+                "period_end": format_dt(last_ts) if last_ts else "",
+                "total_queries": total_rows,
+                "avg_chunks": avg_chunks,
+                "avg_tokens": avg_tokens,
+                "avg_budget_utilization_pct": avg_util,
+                "avg_latency_ms": avg_latency,
+                "p95_chunks": p95_chunks,
+                "p95_tokens": p95_tokens,
+                "p95_budget_utilization_pct": p95_util,
+                "p95_latency_ms": p95_latency
+            },
+            "daily": daily_rows
+        }
+        print(json.dumps(output, indent=2))
+        return
+    
+    # Saída em texto formatado
+    print("=== RESUMO DE MÉTRICAS DO MCP ===")
+    print(f"Período: {format_dt(first_ts) if first_ts else 'N/A'} a {format_dt(last_ts) if last_ts else 'N/A'} ({total_rows} consultas)")
+    print()
+    print("Média Geral:")
+    print(f"  Chunks:     {avg_chunks:.1f} (p95: {p95_chunks:.1f})")
+    print(f"  Tokens:     {avg_tokens:.0f} (p95: {p95_tokens:.0f})")
+    print(f"  Utilização: {avg_util:.1f}% (p95: {p95_util:.1f}%)")
+    print(f"  Latência:   {avg_latency:.1f}ms (p95: {p95_latency:.1f}ms)")
+    print()
+    print("Diário:")
+    print(f"{'Dia':<12} {'Chunks':<24} {'Tokens':<24} {'Utilização':<24} {'Latência (ms)':<24}")
+    print(f"{'':<12} {'avg/median/p95':<24} {'avg/median/p95':<24} {'avg/median/p95':<24} {'avg/median/p95':<24}")
+    print("-" * 100)
+    
+    for row in daily_rows:
+        chunks_str = f"{row['avg_chunks']:.1f}/{row['median_chunks']:.1f}/{row['p95_chunks']:.1f}"
+        tokens_str = f"{row['avg_tokens']:.0f}/{row['median_tokens']:.0f}/{row['p95_tokens']:.0f}"
+        util_str = f"{row['avg_util']:.1f}/{row['median_util']:.1f}/{row['p95_util']:.1f}"
+        latency_str = f"{row['avg_latency']:.1f}/{row['median_latency']:.1f}/{row['p95_latency']:.1f}"
+        
+        print(f"{row['day']:<12} {chunks_str:<24} {tokens_str:<24} {util_str:<24} {latency_str:<24}")
 
 def main():
-    args = parse_args()
-    rows = load_rows(args.file)
-    summary = summarize(rows, args)
-    if args.json:
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
-    else:
-        print_table(summary)
+    parser = argparse.ArgumentParser(description="Resumo de métricas do MCP")
+    parser.add_argument("--file", default="mcp_system/.mcp_index/metrics.csv", help="Arquivo CSV de métricas")
+    parser.add_argument("--since", type=int, default=0, help="Filtrar por dias recentes")
+    parser.add_argument("--filter", default="", help="Filtrar por termo na query")
+    parser.add_argument("--json", action="store_true", help="Saída em JSON")
+    
+    args = parser.parse_args()
+    
+    try:
+        rows = load_csv(args.file)
+        rows = filter_rows(rows, args.since, args.filter)
+        summarize(rows, args)
+    except Exception as e:
+        print(f"[erro] {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

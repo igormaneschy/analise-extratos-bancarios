@@ -4,7 +4,7 @@ Sistema Python para análise automatizada de extratos bancários com extração 
 
 ## 🎯 Objetivo
 
-Automatizar a análise de extratos bancários em PDF, extraindo informações relevantes como:
+Automatizar a análise de extratos bancários em PDF e Excel, extraindo informações relevantes como:
 - **Transações**: Data, valor, descrição, tipo
 - **Saldos**: Inicial, final, médio do período
 - **Categorização**: Classificação automática por tipo de gasto
@@ -12,9 +12,10 @@ Automatizar a análise de extratos bancários em PDF, extraindo informações re
 
 ## ✨ Funcionalidades
 
-### 📄 **Processamento de PDFs**
-- Extração de texto de extratos bancários
-- Suporte a múltiplos formatos de bancos
+### 📄 **Processamento de PDFs e Excel**
+- Extração de texto de extratos bancários em PDF
+- Leitura de extratos em formato Excel (XLSX)
+- Suporte a múltiplos formatos de bancos europeus
 - Detecção automática de layout
 
 ### 🏷️ **Categorização Inteligente**
@@ -29,7 +30,7 @@ Automatizar a análise de extratos bancários em PDF, extraindo informações re
 - Relatórios por categoria
 
 ### 📈 **Relatórios**
-- Exportação em múltiplos formatos
+- Exportação em múltiplos formatos (texto, Markdown)
 - Gráficos e visualizações
 - Comparativos mensais
 
@@ -46,136 +47,161 @@ pip install -r requirements.txt
 
 ### Dependências Principais
 - **PyPDF2**: Extração de texto de PDFs
+- **openpyxl**: Leitura de arquivos Excel
 - **pandas**: Manipulação de dados
 - **matplotlib**: Geração de gráficos
 - **reportlab**: Criação de relatórios PDF
 
-## 💻 Uso Básico
+## 📖 Uso
 
-### Análise de um Extrato
-```python
-from src.application.extract_analyzer import ExtractAnalyzer
-
-analyzer = ExtractAnalyzer()
-result = analyzer.analyze_file("extrato.pdf")
-print(result.summary)
-```
-
-### Via Linha de Comando
+### Análise de Extrato
 ```bash
-python main.py --file extrato.pdf --output relatorio.pdf
+# Analisar um extrato em PDF
+python main.py analyze data/samples/extrato.pdf
+
+# Analisar um extrato em Excel
+python main.py analyze data/samples/extrato.xlsx
+
+# Salvar relatório em arquivo
+python main.py analyze data/samples/extrato.pdf --output relatorio.txt
+
+# Gerar relatório em Markdown
+python main.py analyze data/samples/extrato.pdf --output relatorio.md --format markdown
 ```
 
-## 📁 Estrutura do Projeto
+### Informações do Sistema
+```bash
+# Ver informações sobre o sistema
+python main.py info
 
+# Criar arquivo de instruções de teste
+python main.py sample
 ```
-├── README.md                    # Este arquivo
-├── requirements.txt             # Dependências
-├── main.py                      # Ponto de entrada
-├── src/                        # Código fonte
-│   ├── domain/                 # Entidades e regras de negócio
-│   ├── application/            # Casos de uso e serviços
-│   ├── infrastructure/         # Implementações (leitores, parsers)
-│   ├── presentation/           # Interface CLI/API
-│   └── utils/                  # Utilitários
-├── tests/                      # Testes
-├── data/                       # Dados de exemplo
-│   └── samples/               # Extratos de exemplo
-├── scripts/                    # Scripts utilitários
-└── dev_history.md             # Histórico de desenvolvimento
+
+## 🏦 Bancos Suportados
+
+O sistema suporta extratos de diversos bancos europeus, incluindo:
+
+**Portugal:**
+- Banco BPI
+- Caixa Geral de Depósitos
+- Banco Comercial Português
+- Millennium BCP
+- Novo Banco
+- Banco Santander Totta
+
+**Espanha:**
+- Santander
+- BBVA
+- CaixaBank
+- Banco Sabadell
+
+**França:**
+- BNP Paribas
+- Crédit Agricole
+- ING Bank
+
+**Alemanha:**
+- Deutsche Bank
+- Commerzbank
+- Sparkasse
+- Volksbank
+
+**Itália:**
+- UniCredit
+- Intesa Sanpaolo
+
+**Países Baixos:**
+- ING Bank
+- ABN AMRO
+- Rabobank
+
+**Bélgica:**
+- KBC Bank
+- Belfius
+- BNP Paribas Fortis
+
+**Áustria:**
+- Erste Bank
+- Raiffeisen
+
+**Suíça:**
+- UBS
+- Credit Suisse
+
+**Reino Unido:**
+- HSBC
+- Barclays
+- Lloyds
+- NatWest
+
+**Bancos Digitais:**
+- Revolut
+- Wise (TransferWise)
+- N26
+- Monzo
+- Starling Bank
+
+## 🛠️ Desenvolvimento
+
+### Estrutura do Projeto
 ```
+src/
+├── domain/          # Modelos e interfaces do domínio
+├── application/     # Casos de uso e lógica de aplicação
+├── infrastructure/  # Implementações concretas
+│   ├── readers/     # Leitores de diferentes formatos
+│   ├── categorizers/ # Categorizadores de transações
+│   ├── analyzers/   # Analisadores de extratos
+│   └── reports/     # Geradores de relatórios
+└── presentation/    # Interface com o usuário (CLI)
+```
+
+### Adicionando Suporte a Novos Bancos
+
+1. Atualize o arquivo `src/infrastructure/readers/pdf_reader_config.json` com padrões específicos do banco
+2. Adicione padrões de nome do banco na lista `bank_name_patterns`
+3. Teste com extratos reais do banco
+
+### Criando Novos Leitores
+
+Implemente a interface `StatementReader` no módulo `src.domain.interfaces`:
+
+```python
+class StatementReader(ABC):
+    @abstractmethod
+    def can_read(self, file_path: Path) -> bool:
+        """Verifica se pode ler o arquivo."""
+        pass
+    
+    @abstractmethod
+    def read(self, file_path: Path) -> BankStatement:
+        """Lê o arquivo e retorna um extrato."""
+        pass
+```
+
+## 📋 Próximos Passos (Roadmap)
+
+- [x] Suporte a múltiplos formatos de arquivo (PDF, Excel)
+- [x] Expansão para bancos europeus
+- [ ] Suporte a mais formatos (CSV, OFX)
+- [ ] Integração com IA para categorização aprimorada
+- [ ] Detecção automática de padrões de bancos
+- [ ] Persistência das análises para histórico e modelo de aprendizagem
+- [ ] Interface web com Flask/Django
+- [ ] API REST para integração
+- [ ] Internacionalização (português, inglês, espanhol)
 
 ## 🧪 Testes
 
 ```bash
-# Executar todos os testes
-python -m pytest tests/
+# Executar testes
+pytest
 
-# Testes com cobertura
-python -m pytest tests/ --cov=src
+# Executar testes com cobertura
+pytest --cov=src
 ```
 
-## 📊 Exemplo de Uso
+## 📄 Licença
 
-### 1. Criar Extrato de Exemplo
-```bash
-python scripts/create_sample_pdf.py
-```
-
-### 2. Analisar Extrato
-```python
-from src.application.extract_analyzer import ExtractAnalyzer
-
-# Inicializar analisador
-analyzer = ExtractAnalyzer()
-
-# Analisar arquivo
-result = analyzer.analyze_file("data/samples/extrato_exemplo.pdf")
-
-# Visualizar resultados
-print(f"Total de transações: {len(result.transactions)}")
-print(f"Saldo inicial: R$ {result.initial_balance:.2f}")
-print(f"Saldo final: R$ {result.final_balance:.2f}")
-
-# Categorias mais frequentes
-for category, count in result.category_summary.items():
-    print(f"{category}: {count} transações")
-```
-
-### 3. Gerar Relatório
-```python
-# Gerar relatório PDF
-report = analyzer.generate_report(result)
-report.save("relatorio_financeiro.pdf")
-
-# Exportar dados para Excel
-result.to_excel("transacoes.xlsx")
-```
-
-## 🔧 Configuração
-
-### Personalizar Categorias
-Edite o arquivo `src/domain/categories.py` para adicionar suas próprias categorias:
-
-```python
-CATEGORIES = {
-    "alimentacao": ["supermercado", "restaurante", "lanchonete"],
-    "transporte": ["uber", "taxi", "combustivel", "estacionamento"],
-    "saude": ["farmacia", "hospital", "clinica"],
-    # Adicione suas categorias aqui
-}
-```
-
-### Configurar Bancos Suportados
-Adicione novos parsers em `src/infrastructure/parsers/` para suportar diferentes bancos.
-
-## 📈 Roadmap
-
-- [ ] **Interface Web**: Dashboard interativo
-- [ ] **API REST**: Endpoints para integração
-- [ ] **Machine Learning**: Categorização mais inteligente
-- [ ] **Múltiplos Bancos**: Suporte expandido
-- [ ] **Exportação**: Mais formatos de saída
-- [ ] **Alertas**: Notificações de gastos incomuns
-
-## 🤝 Contribuição
-
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/nova-funcionalidade`)
-3. Commit suas mudanças (`git commit -am 'Adiciona nova funcionalidade'`)
-4. Push para a branch (`git push origin feature/nova-funcionalidade`)
-5. Abra um Pull Request
-
-## 📝 Licença
-
-Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalhes.
-
-## 🆘 Suporte
-
-- **Issues**: Reporte bugs ou solicite funcionalidades
-- **Documentação**: Consulte a pasta `src/` para detalhes técnicos
-- **Exemplos**: Veja `data/samples/` para arquivos de exemplo
-
----
-
-**Desenvolvido para simplificar a análise de extratos bancários e fornecer insights financeiros valiosos.**
+MIT License - veja o arquivo [LICENSE](LICENSE) para mais detalhes.

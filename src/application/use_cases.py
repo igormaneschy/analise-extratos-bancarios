@@ -1,8 +1,8 @@
 """
-Caso de uso principal para análise de extratos.
+Casos de uso para análise de extratos.
 """
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from src.domain.interfaces import (
     StatementReader,
@@ -10,6 +10,7 @@ from src.domain.interfaces import (
     StatementAnalyzer,
     ReportGenerator,
 )
+from src.domain.models import BankStatement, AnalysisResult
 
 
 class AnalyzeStatementUseCase:
@@ -62,17 +63,25 @@ class ExtractAnalyzer:
     def __init__(self):
         # Importa implementações concretas
         from src.infrastructure.readers.pdf_reader import PDFStatementReader
+        from src.infrastructure.readers.excel_reader import ExcelStatementReader
         from src.infrastructure.categorizers.keyword_categorizer import KeywordCategorizer
         from src.infrastructure.analyzers.basic_analyzer import BasicStatementAnalyzer
         from src.infrastructure.reports.text_report import TextReportGenerator
 
         # Inicializa componentes
         self.pdf_reader = PDFStatementReader()
+        self.excel_reader = ExcelStatementReader()
         self.categorizer = KeywordCategorizer()
         self.analyzer = BasicStatementAnalyzer()
         self.text_report = TextReportGenerator()
 
-        # Cria caso de uso
+        # Lista de leitores disponíveis
+        self.readers: List[StatementReader] = [
+            self.pdf_reader,
+            self.excel_reader
+        ]
+
+        # Cria caso de uso com o primeiro leitor (será substituído dinamicamente)
         self.use_case = AnalyzeStatementUseCase(
             reader=self.pdf_reader,
             categorizer=self.categorizer,
@@ -80,12 +89,27 @@ class ExtractAnalyzer:
             report_generator=self.text_report,
         )
 
+    def _get_appropriate_reader(self, file_path: str) -> StatementReader:
+        """Retorna o leitor apropriado para o tipo de arquivo."""
+        file_path_obj = Path(file_path)
+        for reader in self.readers:
+            if reader.can_read(file_path_obj):
+                return reader
+        raise ValueError(f"Nenhum leitor disponível para o arquivo: {file_path}")
+
     def analyze_file(
         self,
         file_path: str,
         output_path: Optional[str] = None,
     ) -> tuple:
-        return self.use_case.execute(file_path, output_path)
+        # Seleciona o leitor apropriado
+        reader = self._get_appropriate_reader(file_path)
+        
+        # Atualiza o caso de uso com o leitor correto
+        self.use_case.reader = reader
+        
+        result, report = self.use_case.execute(file_path, output_path)
+        return result, report, reader.read(Path(file_path))
 
     def analyze_and_print(self, file_path: str):
         result, report = self.analyze_file(file_path)

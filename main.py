@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
 CLI principal para análise de extratos bancários.
-
-
 """
 import sys
 from pathlib import Path
@@ -32,7 +30,7 @@ def cli():
 @click.option('--output', '-o', help='Caminho para salvar o relatório')
 @click.option('--format', '-f', type=click.Choice(['text', 'markdown']), default='text', help='Formato do relatório')
 def analyze(file_path, output, format):
-    """Analisa um extrato bancário em PDF."""
+    """Analisa um extrato bancário em PDF ou Excel."""
     try:
         analyzer = ExtractAnalyzer()
 
@@ -41,13 +39,8 @@ def analyze(file_path, output, format):
             from src.infrastructure.reports.text_report import MarkdownReportGenerator
             analyzer.use_case.report_generator = MarkdownReportGenerator()
 
-        print(f"DEBUG: Iniciando análise do arquivo: {file_path}")
-        result, report = analyzer.analyze_file(file_path, output)
-        print(f"DEBUG: Análise concluída. Total de transações: {result.metadata.get('transaction_count', 0)}")
-        print(f"DEBUG: Receitas: {result.total_income}")
-        print(f"DEBUG: Despesas: {result.total_expenses}")
-        print(f"DEBUG: Saldo: {result.net_flow}")
-
+        result, report, statement = analyzer.analyze_file(file_path, output)
+        
         # Mostra resumo no console
         console.print(Panel.fit(
             f"[bold green]✓ Análise concluída![/bold green]\n\n"
@@ -104,15 +97,17 @@ INSTRUÇÕES PARA TESTE DO SISTEMA
 
 Para testar o sistema de análise de extratos, você precisa:
 
-1. Obter um extrato bancário em PDF
-   - Pode ser do seu banco (Itaú, Bradesco, Santander, etc.)
-   - Certifique-se de que é um PDF com texto (não escaneado)
+1. Obter um extrato bancário em PDF ou Excel
+   - Pode ser do seu banco (Santander, BBVA, CaixaBank, BPI, etc.)
+   - Certifique-se de que é um PDF com texto (não escaneado) ou Excel
 
-2. Colocar o arquivo PDF na pasta 'data/samples/'
-   - Exemplo: data/samples/extrato_janeiro.pdf
+2. Colocar o arquivo na pasta 'data/samples/'
+   - Exemplo PDF: data/samples/extrato_janeiro.pdf
+   - Exemplo Excel: data/samples/extrato_janeiro.xlsx
 
 3. Executar a análise:
    python main.py analyze data/samples/extrato_janeiro.pdf
+   python main.py analyze data/samples/extrato_janeiro.xlsx
 
 4. Para salvar o relatório:
    python main.py analyze data/samples/extrato_janeiro.pdf --output relatorio.txt
@@ -128,6 +123,13 @@ O sistema espera encontrar no PDF:
 - Valor (com R$ ou indicação de C/D para crédito/débito)
 - Saldo (opcional)
 
+FORMATO ESPERADO DO EXCEL
+-------------------------
+O sistema espera encontrar no Excel:
+- Aba com transações (primeira aba será usada)
+- Cabeçalho com "Data Mov.", "Data Valor", "Descrição", "Valor", etc.
+- Colunas com datas e valores monetários
+
 LIMITAÇÕES ATUAIS
 -----------------
 - Suporta apenas PDFs com texto extraível
@@ -138,7 +140,6 @@ LIMITAÇÕES ATUAIS
 PRÓXIMAS MELHORIAS
 ------------------
 - Integração com IA para melhor categorização
-- Suporte para Excel e CSV
 - Detecção automática de padrões de bancos
 - Interface web
 """
@@ -150,7 +151,7 @@ PRÓXIMAS MELHORIAS
         f"[bold green]✓ Arquivo de instruções criado![/bold green]\n\n"
         f"📄 Local: {sample_file}\n\n"
         f"[yellow]⚠️  Importante:[/yellow]\n"
-        f"Você precisa adicionar um PDF de extrato real para testar.\n"
+        f"Você precisa adicionar um PDF ou Excel de extrato real para testar.\n"
         f"Leia as instruções no arquivo criado.",
         title="Instruções de Teste"
     ))
@@ -166,11 +167,11 @@ def info():
     table.add_column("Descrição", style="white")
     
     table.add_row("Leitor PDF", "✓ Implementado", "Extrai dados de PDFs bancários")
+    table.add_row("Leitor Excel", "✓ Implementado", "Extrai dados de arquivos Excel")
     table.add_row("Categorizador", "✓ Implementado", "Categoriza por palavras-chave")
     table.add_row("Analisador", "✓ Implementado", "Gera insights e alertas")
     table.add_row("Relatórios", "✓ Implementado", "Texto e Markdown")
     table.add_row("IA", "⏳ Planejado", "Integração com GPT/Claude")
-    table.add_row("Excel/CSV", "⏳ Planejado", "Suporte adicional")
     
     console.print(table)
     

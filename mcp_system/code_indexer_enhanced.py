@@ -509,10 +509,19 @@ class EnhancedCodeIndexer:
                 import sys
                 sys.stderr.write(f"⚠️  Erro ao inicializar auto-indexação: {e}\n")
                 self.enable_auto_indexing = False
-        
+
+        # Inicializa o gerenciador de histórico de desenvolvimento
+        try:
+            from src.utils.dev_history import dev_history_manager
+            self.dev_history_manager = dev_history_manager
+        except ImportError:
+            import sys
+            sys.stderr.write("⚠️  Erro ao inicializar gerenciador de histórico\n")
+            self.dev_history_manager = None
+
         # Lock para thread safety
         self._lock = threading.RLock()
-    
+
     def _auto_index_callback(self, changed_files: List[Path]) -> Dict[str, Any]:
         """Callback para reindexação automática de arquivos modificados"""
         with self._lock:
@@ -523,19 +532,40 @@ class EnhancedCodeIndexer:
                 # Reindexar usando indexador base
                 result = self.index_files(file_paths, show_progress=False)
 
+                # Registra as mudanças no histórico de desenvolvimento
+                if self.dev_history_manager:
+                    try:
+                        # Filtra arquivos que devem ser rastreados
+                        tracked_files = [f for f in file_paths if self.dev_history_manager.should_track_file(f)]
+                        if tracked_files:
+                            self.dev_history_manager.update_history(
+                                file_paths=tracked_files,
+                                action_type="Refatoração",
+                                description="Atualização automática de arquivos detectada pelo sistema de auto-indexação.",
+                                details={
+                                    "Problema": "Arquivos do projeto foram modificados e precisam ser reindexados",
+                                    "Causa": f"Modificação detectada em {len(tracked_files)} arquivo(s) pelo sistema de monitoramento",
+                                    "Solução": "Reindexação automática realizada e registro no histórico de desenvolvimento",
+                                    "Observações": f"Arquivos atualizados: {', '.join(tracked_files)}"
+                                }
+                            )
+                    except Exception as e:
+                        import sys
+                        sys.stderr.write(f"⚠️  Erro ao registrar no histórico: {e}\n")
+
                 # Mensagens de debug via stderr para não interferir com protocolo MCP
                 import sys
                 sys.stderr.write(f"🔄 Auto-reindexação: {result.get('files_indexed', 0)} arquivos, {result.get('chunks', 0)} chunks\n")
-                
+
                 return result
-                
+
             except Exception as e:
                 import sys
                 sys.stderr.write(f"❌ Erro na auto-indexação: {e}\n")
                 return {"files_indexed": 0, "chunks": 0, "error": str(e)}
-    
-    def index_files(self, 
-                   paths: List[str], 
+
+    def index_files(self,
+                   paths: List[str],
                    recursive: bool = True,
                    include_globs: List[str] = None,
                    exclude_globs: List[str] = None,

@@ -160,18 +160,27 @@ class PDFStatementReader(StatementReader):
             return None
 
         amount_str = amount_match.group(0)
+
+        # Check for negative sign within 3 characters before the amount in the line
+        start_index = amount_match.start()
+        negative_sign_found = False
+        for i in range(max(0, start_index - 3), start_index):
+            if line[i] == '-':
+                negative_sign_found = True
+                break
+        if negative_sign_found:
+            amount_str = '-' + amount_str
+
         amount = self._parse_amount(amount_str)
 
-        # Determine credit or debit using config patterns
-        if re.match(self.credit_pattern, amount_str):
-            transaction_type = TransactionType.CREDIT
-        elif re.match(self.debit_pattern, amount_str):
+        # Extract description (remove date and amount)
+        description = line.replace(date_match.group(0), '').replace(amount_match.group(0), '').strip()
+
+        # Determine credit or debit based on sign of amount
+        if amount < 0:
             transaction_type = TransactionType.DEBIT
         else:
-            transaction_type = TransactionType.DEBIT if amount < 0 else TransactionType.CREDIT
-
-        # Extract description (remove date and amount)
-        description = line.replace(date_match.group(0), '').replace(amount_str, '').strip()
+            transaction_type = TransactionType.CREDIT
 
         # Parse date to datetime object
         try:
@@ -190,7 +199,7 @@ class PDFStatementReader(StatementReader):
         return Transaction(
             date=date_obj,
             description=description,
-            amount=abs(amount),
+            amount=amount,  # Preserve the sign of the amount
             type=transaction_type
         )
 

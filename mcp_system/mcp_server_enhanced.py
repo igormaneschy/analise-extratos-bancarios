@@ -54,6 +54,16 @@ except ImportError as e:
         sys.stderr.write(f"[mcp_server_enhanced] ❌ Erro crítico: {e2}\n")
         raise
 
+# Importa o gerenciador de histórico de desenvolvimento
+try:
+    from src.utils.dev_history import dev_history_manager
+    HAS_DEV_HISTORY = True
+    sys.stderr.write("[mcp_server_enhanced] ✅ Sistema de histórico de desenvolvimento carregado\n")
+except ImportError as e:
+    sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Sistema de histórico de desenvolvimento não disponível: {e}\n")
+    HAS_DEV_HISTORY = False
+    dev_history_manager = None
+
 HAS_ENHANCED_FEATURES = HAS_ENHANCED
 
 # Config / instâncias
@@ -73,33 +83,62 @@ else:
 def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exclude_globs):
     """Handler para indexar um caminho"""
     sys.stderr.write(f"🔍 [index_path] {path} (recursive={recursive}, semantic={enable_semantic}, watcher={auto_start_watcher})\n")
-    
+
     try:
         # Converte path relativo para absoluto
         if not os.path.isabs(path):
             path = os.path.join(INDEX_ROOT, path)
-        
+
         if HAS_ENHANCED_FEATURES:
             result = enhanced_index_repo_paths(
-                _indexer, 
-                [path], 
+                _indexer,
+                [path],
                 recursive=recursive,
                 enable_semantic=enable_semantic,
                 exclude_globs=exclude_globs or []
             )
-            
+
             if auto_start_watcher and hasattr(_indexer, 'start_auto_indexing'):
                 _indexer.start_auto_indexing(paths=[path], recursive=recursive)
                 result['auto_indexing'] = 'started'
         else:
             result = index_repo_paths(
-                _indexer, 
-                [path], 
+                _indexer,
+                [path],
                 recursive=recursive
             )
-        
+
+        # Registra a operação no histórico de desenvolvimento
+        if HAS_DEV_HISTORY and dev_history_manager:
+            try:
+                # Determina os arquivos que foram indexados
+                indexed_files = []
+                if isinstance(result, dict) and 'files_processed' in result:
+                    indexed_files = result['files_processed']
+                elif isinstance(result, dict) and 'indexed_files' in result:
+                    indexed_files = result['indexed_files']
+
+                # Registra apenas se houve arquivos indexados
+                if indexed_files:
+                    # Filtra arquivos que devem ser rastreados
+                    tracked_files = [f for f in indexed_files if dev_history_manager.should_track_file(f)]
+                    if tracked_files:
+                        dev_history_manager.update_history(
+                            file_paths=tracked_files,
+                            action_type="Melhoria",
+                            description="Indexação de arquivos para busca semântica e contexto.",
+                            details={
+                                "Problema": "Necessidade de indexar arquivos para busca semântica",
+                                "Causa": f"Requisição de indexação do caminho '{path}'",
+                                "Solução": f"Indexação realizada de {len(tracked_files)} arquivo(s) para busca semântica",
+                                "Observações": f"Caminho indexado: {path}, Recursivo: {recursive}"
+                            }
+                        )
+            except Exception as e:
+                sys.stderr.write(f"⚠️  Erro ao registrar indexação no histórico: {e}\n")
+
         return result
-        
+
     except Exception as e:
         sys.stderr.write(f"❌ [index_path] Erro: {str(e)}\n")
         return {'status': 'error', 'error': str(e)}
@@ -332,6 +371,28 @@ else:
                 }
             ),
             Tool(
+                name="cache_management",
+                description="Gerencia caches (clear/status)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "default": "status"},
+                        "cache_type": {"type": "string", "default": "all"}
+                    },
+                }
+            ),
+            Tool(
+                name="get_dev_history",
+                description="Recupera o histórico completo de desenvolvimento",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "default": 50},
+                        "full_history": {"type": "boolean", "default": False}
+                    }
+                }
+            ),
+            Tool(
                 name="auto_index",
                 description="Controla sistema de auto-indexação (start/stop/status)",
                 inputSchema={
@@ -349,13 +410,24 @@ else:
                 inputSchema={"type": "object", "properties": {}}
             ),
             Tool(
-                name="cache_management", 
+                name="cache_management",
                 description="Gerencia caches (clear/status)",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "default": "status"},
                         "cache_type": {"type": "string", "default": "all"}
+                    }
+                }
+            ),
+            Tool(
+                name="get_dev_history",
+                description="Obtém histórico de desenvolvimento",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "default": 50},
+                        "full_history": {"type": "boolean", "default": False}
                     }
                 }
             )
@@ -398,18 +470,74 @@ else:
                 arguments.get("action", "status"),
                 arguments.get("cache_type", "all")
             )
+        elif name == "get_dev_history":
+            if not HAS_DEV_HISTORY or not dev_history_manager:
+                result = {"status": "error", "error": "Development history feature not available"}
+            else:
+                result = dev_history_manager.get_history(
+                    limit=arguments.get("limit", 50),
+                    full_history=arguments.get("full_history", False)
+                )
+        elif name == "cache_management":
+            result = _handle_cache_management(
+                arguments.get("action", "status"),
+                arguments.get("cache_type", "all")
+            )
         else:
             result = {"status": "error", "error": f"Tool {name} not found"}
-        
+
         return [TextContent(type="text", text=str(result))]
 
 # ===== INICIALIZAÇÃO DO SERVIDOR =====
 
+def _handle_get_dev_history(limit: int = 50, full_history: bool = False):
+    """Handler para recuperar o histórico de desenvolvimento"""
+    try:
+        import os
+
+        # Determina qual arquivo usar
+        history_file = "dev_history_full.md" if full_history and os.path.exists("dev_history_full.md") else "dev_history.md"
+
+        if not os.path.exists(history_file):
+            return {"status": "error", "error": f"Arquivo {history_file} não encontrado"}
+
+        with open(history_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Retorna as últimas 'limit' entradas (ou todas se limit for 0)
+        if limit > 0:
+            # Conta o número de entradas (linhas que começam com [)
+            entry_count = 0
+            entry_lines = []
+
+            # Processa de trás para frente para pegar as últimas entradas
+            for line in reversed(lines):
+                if line.strip().startswith("[") and " - " in line and entry_count < limit:
+                    entry_count += 1
+                entry_lines.append(line)
+
+            # Inverte novamente para manter a ordem cronológica
+            content = "".join(reversed(entry_lines))
+        else:
+            content = "".join(lines)
+
+        return {
+            "status": "success",
+            "history_file": history_file,
+            "content": content,
+            "entry_count": content.count("[2025-")  # Aproximação do número de entradas
+        }
+
+    except Exception as e:
+        import sys
+        sys.stderr.write(f"❌ [get_dev_history] Erro: {str(e)}\n")
+        return {"status": "error", "error": str(e)}
+
 if __name__ == "__main__":
     # Log de inicialização
     sys.stderr.write("🔄 Iniciando servidor MCP melhorado...\n")
-    
-    # Mostra status das funcionalidades  
+
+    # Mostra status das funcionalidades
     if HAS_ENHANCED_FEATURES:
         sys.stderr.write("✅ Sistema de busca semântica ativado\n")
         sys.stderr.write("✅ Sistema de auto-indexação ativado\n")

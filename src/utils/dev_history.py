@@ -1,4 +1,4 @@
-w#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Módulo para gerenciamento do histórico de desenvolvimento (dev_history.md)
 Segue as regras definidas em .codellm/rules/01-historico_desenvolvimento.mdc
