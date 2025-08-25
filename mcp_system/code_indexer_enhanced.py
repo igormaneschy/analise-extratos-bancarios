@@ -11,7 +11,9 @@ import pathlib
 # Diretório atual deste módulo para resoluções relativas ao pacote mcp_system
 CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
-METRICS_PATH = os.environ.get("MCP_METRICS_FILE", str(CURRENT_DIR / ".mcp_index/metrics.csv"))
+# CSV padrão para métricas de context_pack (consultas)
+# Mantém compatibilidade via env MCP_METRICS_FILE, mas por padrão separa em metrics_context.csv
+METRICS_PATH = os.environ.get("MCP_METRICS_FILE", str(CURRENT_DIR / ".mcp_index/metrics_context.csv"))
 
 def _log_metrics(row: dict):
     """Append de uma linha de métricas em CSV."""

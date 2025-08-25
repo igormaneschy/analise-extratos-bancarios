@@ -9,6 +9,8 @@ import sys
 from typing import Any, Dict, List
 import pathlib
 import threading
+import csv
+import datetime as dt
 
 # Obter o diretório do script atual
 CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
@@ -96,8 +98,9 @@ def _initial_index():
         for p in AUTO_INDEX_PATHS:
             abs_paths.append(p if os.path.isabs(p) else os.path.join(INDEX_ROOT, p))
 
+        # Executa indexação inicial e captura resultado
         if HAS_ENHANCED_FEATURES:
-            enhanced_index_repo_paths(
+            result = enhanced_index_repo_paths(
                 _indexer,
                 abs_paths,
                 recursive=AUTO_INDEX_RECURSIVE,
@@ -107,12 +110,45 @@ def _initial_index():
             if AUTO_START_WATCHER and hasattr(_indexer, 'start_auto_indexing'):
                 _indexer.start_auto_indexing()
         else:
-            index_repo_paths(
+            result = index_repo_paths(
                 _indexer,
                 abs_paths,
                 recursive=AUTO_INDEX_RECURSIVE
             )
         sys.stderr.write("[mcp_server_enhanced] ✅ Indexação inicial concluída\n")
+
+        # Registrar métricas da indexação inicial em metrics_index.csv
+        try:
+            index_dir = getattr(_indexer, 'index_dir', None)
+            if not index_dir and hasattr(_indexer, 'base_indexer'):
+                index_dir = getattr(_indexer.base_indexer, 'index_dir', None)
+            index_dir_str = str(index_dir) if index_dir else str(CURRENT_DIR / ".mcp_index")
+
+            metrics_dir = pathlib.Path(index_dir_str)
+            metrics_dir.mkdir(parents=True, exist_ok=True)
+            metrics_path = metrics_dir / "metrics_index.csv"
+
+            row = {
+                "ts": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+                "op": "initial_index",
+                "path": os.pathsep.join(AUTO_INDEX_PATHS),
+                "index_dir": index_dir_str,
+                "files_indexed": int(result.get("files_indexed", 0)) if isinstance(result, dict) else 0,
+                "chunks": int(result.get("chunks", 0)) if isinstance(result, dict) else 0,
+                "recursive": bool(AUTO_INDEX_RECURSIVE),
+                "include_globs": "",
+                "exclude_globs": "",
+                "elapsed_s": float(result.get("elapsed_s", 0.0)) if isinstance(result, dict) else 0.0,
+            }
+
+            file_exists = metrics_path.exists()
+            with open(metrics_path, "a", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=list(row.keys()))
+                if not file_exists:
+                    w.writeheader()
+                w.writerow(row)
+        except Exception as e:
+            sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Falha ao logar métricas de indexação inicial: {e}\n")
     except Exception as e:
         sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Falha na indexação inicial: {e}\n")
 

@@ -4,14 +4,14 @@ Reindexador simples para o MCP Code Indexer.
 
 - Remove (opcional) o diretório de índice.
 - Reindexa arquivos conforme include/exclude globs.
-- Mede tempo e grava linha no CSV de métricas (MCP_METRICS_FILE ou .mcp_index/metrics.csv).
+- Mede tempo e grava linha no CSV de métricas (MCP_METRICS_FILE ou .mcp_index/metrics_index.csv).
 - (Opcional) Calcula baseline aproximada de tokens do repositório.
 
 Exemplos:
   python reindex.py --clean
   python reindex.py --path src --include "**/*.py" --exclude "**/tests/**"
   python reindex.py --baseline-estimate
-  MCP_METRICS_FILE=".mcp_index/metrics.csv" python reindex.py --clean
+  MCP_METRICS_FILE=".mcp_index/metrics_index.csv" python reindex.py --clean
 
 Requer:
   - code_indexer_enhanced.py com CodeIndexer e index_repo_paths

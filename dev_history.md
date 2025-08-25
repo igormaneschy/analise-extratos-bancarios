@@ -1,4 +1,14 @@
 [2025-08-25] - Assistant
+Arquivos: mcp_system/scripts/summarize_metrics.py, mcp_system/mcp_server_enhanced.py, mcp_system/reindex.py, mcp_system/code_indexer_enhanced.py
+Ação/Tipo: Melhoria
+Descrição: Separa métricas de contexto e indexação em arquivos distintos, adiciona agrupamento por fuso horário e registra métricas na indexação inicial do servidor.
+Detalhes:
+Problema: Métricas misturadas em um único CSV e ausência de registros na indexação automática inicial impediam ver dados do dia atual.
+Causa: build_context_pack e reindex compartilhavam o mesmo arquivo; _initial_index não registrava métricas.
+Solução: summarize_metrics agora lê múltiplas fontes (metrics_context.csv, metrics_index.csv, metrics.csv); code_indexer grava em metrics_context.csv; reindex grava em metrics_index.csv; servidor passa a registrar initial_index em metrics_index.csv; adicionado parâmetro --tz (local/utc) para agrupamento diário.
+Observações: Env MCP_METRICS_FILE continua suportado para sobrescrever o destino de métricas.
+
+[2025-08-25] - Assistant
 Arquivos: mcp_system/embeddings/semantic_search.py
 Ação/Tipo: Melhoria
 Descrição: Implementa lazy-load do modelo de embeddings para reduzir latência de startup.
