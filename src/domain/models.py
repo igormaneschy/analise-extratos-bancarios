@@ -72,6 +72,7 @@ class BankStatement:
     period_end: datetime = field(default_factory=datetime.now)
     initial_balance: Decimal = Decimal("0.00")
     final_balance: Decimal = Decimal("0.00")
+    currency: str = "EUR"  # Moeda padrão
     transactions: List[Transaction] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     
@@ -131,6 +132,7 @@ class AnalysisResult:
     total_income: Decimal
     total_expenses: Decimal
     net_flow: Decimal
+    currency: str  # Moeda do extrato
     categories_summary: dict[TransactionCategory, Decimal]
     monthly_summary: dict[str, dict[str, Decimal]]
     alerts: List[str] = field(default_factory=list)

@@ -11,13 +11,14 @@ import pandas as pd
 from src.domain.models import BankStatement, Transaction, TransactionType
 from src.domain.interfaces import StatementReader
 from src.domain.exceptions import FileNotSupportedError, ParsingError
+from src.utils.currency_utils import CurrencyUtils
 
 
 class ExcelStatementReader(StatementReader):
     """Leitor de extratos bancários em formato Excel."""
     
     def __init__(self):
-        self.currency = "EUR"
+        self.currency = "EUR"  # Será detectado automaticamente
         
     def can_read(self, file_path: Path) -> bool:
         """Verifica se pode ler o arquivo Excel."""
@@ -32,6 +33,10 @@ class ExcelStatementReader(StatementReader):
             # Assume que os dados estão na primeira aba
             df = pd.read_excel(file_path, sheet_name=excel_file.sheet_names[0])
             
+            # Detecta a moeda automaticamente
+            detected_currency = CurrencyUtils.extract_currency_from_dataframe(df)
+            self.currency = detected_currency
+            
             # Extrai as transações do DataFrame
             transactions = self._extract_transactions(df)
             
@@ -43,8 +48,9 @@ class ExcelStatementReader(StatementReader):
                 period_end=self._extract_end_date(transactions),
                 initial_balance=self._extract_initial_balance(df),
                 final_balance=self._extract_final_balance(df),
+                currency=self.currency,  # Usa a moeda detectada
                 transactions=transactions,
-                metadata={"currency": self.currency}
+                metadata={"currency": self.currency, "source_file": str(file_path)}
             )
             
             return statement
@@ -102,20 +108,23 @@ class ExcelStatementReader(StatementReader):
                 transactions.append(transaction)
                 
             except Exception as e:
-                # Ignora linhas que não conseguem ser parseadas como transações
+                # Log do erro mas continua processando
+                print(f"Erro ao processar linha {idx}: {e}")
                 continue
         
         return transactions
     
     def _parse_date(self, date_str: str) -> datetime:
         """Faz parsing de uma string de data."""
-        # Tenta diferentes formatos de data
+        # Formatos de data comuns
         date_formats = [
-            "%d-%m-%Y",
-            "%d/%m/%Y",
-            "%Y-%m-%d",
-            "%d-%m-%y",
-            "%d/%m/%y"
+            '%d/%m/%Y',
+            '%d/%m/%y',
+            '%d-%m-%Y',
+            '%d-%m-%y',
+            '%Y-%m-%d',
+            '%d.%m.%Y',
+            '%d.%m.%y'
         ]
         
         for fmt in date_formats:

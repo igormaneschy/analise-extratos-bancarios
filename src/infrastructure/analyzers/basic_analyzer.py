@@ -7,6 +7,7 @@ from typing import Dict
 
 from src.domain.models import BankStatement, AnalysisResult, TransactionCategory
 from src.domain.interfaces import StatementAnalyzer
+from src.utils.currency_utils import CurrencyUtils
 
 
 class BasicStatementAnalyzer(StatementAnalyzer):
@@ -36,6 +37,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             total_income=total_income,
             total_expenses=total_expenses,
             net_flow=net_flow,
+            currency=statement.currency,  # Propaga a moeda do extrato
             categories_summary=categories_summary,
             monthly_summary=monthly_summary,
             alerts=alerts,
@@ -78,11 +80,12 @@ class BasicStatementAnalyzer(StatementAnalyzer):
     def _generate_alerts(self, statement: BankStatement, categories_summary: Dict) -> list[str]:
         """Gera alertas baseados na análise."""
         alerts = []
+        currency_symbol = CurrencyUtils.get_currency_symbol(statement.currency)
         
         # Alerta de saldo negativo
         if statement.net_flow < 0:
             deficit = abs(statement.net_flow)
-            alerts.append(f"⚠️ Atenção: Despesas superaram receitas em R$ {deficit:.2f}")
+            alerts.append(f"⚠️ Atenção: Despesas superaram receitas em {currency_symbol} {deficit:.2f}")
         
         # Alerta de muitas transações não categorizadas
         uncategorized = sum(
@@ -111,7 +114,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
         for transaction in statement.transactions:
             if transaction.is_expense and transaction.amount > avg_expense * 3:
                 alerts.append(
-                    f"⚠️ Transação de alto valor: {transaction.description[:50]} - R$ {transaction.amount:.2f}"
+                    f"⚠️ Transação de alto valor: {transaction.description[:50]} - {currency_symbol} {transaction.amount:.2f}"
                 )
         
         return alerts[:5]  # Limita a 5 alertas mais importantes
@@ -119,6 +122,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
     def _generate_insights(self, statement: BankStatement, categories_summary: Dict) -> list[str]:
         """Gera insights sobre os gastos."""
         insights = []
+        currency_symbol = CurrencyUtils.get_currency_symbol(statement.currency)
         
         # Insight sobre categoria com maior gasto
         if categories_summary:
@@ -127,7 +131,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             percentage = (top_amount / statement.total_expenses * 100) if statement.total_expenses > 0 else 0
             
             insights.append(
-                f"💡 Maior categoria de gastos: {top_category.value} (R$ {top_amount:.2f} - {percentage:.1f}%)"
+                f"💡 Maior categoria de gastos: {top_category.value} ({currency_symbol} {top_amount:.2f} - {percentage:.1f}%)"
             )
         
         # Insight sobre média diária de gastos
@@ -135,7 +139,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             days = (statement.period_end - statement.period_start).days
             if days > 0:
                 daily_avg = statement.total_expenses / days
-                insights.append(f"💡 Média diária de gastos: R$ {daily_avg:.2f}")
+                insights.append(f"💡 Média diária de gastos: {currency_symbol} {daily_avg:.2f}")
         
         # Insight sobre padrão de gastos
         expense_transactions = [t for t in statement.transactions if t.is_expense]
@@ -149,7 +153,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             percentage = (small_transactions / len(amounts)) * 100
             
             insights.append(
-                f"💡 {percentage:.0f}% das suas despesas são menores que R$ {median:.2f}"
+                f"💡 {percentage:.0f}% das suas despesas são menores que {currency_symbol} {median:.2f}"
             )
         
         # Insight sobre frequência de transações
@@ -179,7 +183,7 @@ class BasicStatementAnalyzer(StatementAnalyzer):
             
             if potential_savings > 0:
                 insights.append(
-                    f"💡 Potencial de economia: R$ {potential_savings:.2f} reduzindo 20% em gastos discricionários"
+                    f"💡 Potencial de economia: {currency_symbol} {potential_savings:.2f} reduzindo 20% em gastos discricionários"
                 )
         
         return insights[:5]  # Limita a 5 insights mais relevantes

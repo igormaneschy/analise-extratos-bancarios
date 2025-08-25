@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.application.use_cases import ExtractAnalyzer
 from src.domain.exceptions import DomainException
+from src.utils.currency_utils import CurrencyUtils
 
 
 console = Console()
@@ -41,13 +42,16 @@ def analyze(file_path, output, format):
 
         result, report, statement = analyzer.analyze_file(file_path, output)
         
+        # Formata valores com a moeda correta
+        currency_symbol = CurrencyUtils.get_currency_symbol(result.currency)
+        
         # Mostra resumo no console
         console.print(Panel.fit(
             f"[bold green]✓ Análise concluída![/bold green]\n\n"
             f"📊 Total de transações: {result.metadata.get('transaction_count', 0)}\n"
-            f"💰 Receitas: € {result.total_income:,.2f}\n"
-            f"💸 Despesas: € {result.total_expenses:,.2f}\n"
-            f"📈 Saldo: € {result.net_flow:,.2f}",
+            f"💰 Receitas: {CurrencyUtils.format_currency(result.total_income, result.currency)}\n"
+            f"💸 Despesas: {CurrencyUtils.format_currency(result.total_expenses, result.currency)}\n"
+            f"📈 Saldo: {CurrencyUtils.format_currency(result.net_flow, result.currency)}",
             title="Resumo da Análise"
         ))
 
@@ -99,15 +103,14 @@ Para testar o sistema de análise de extratos, você precisa:
 
 1. Obter um extrato bancário em PDF ou Excel
    - Pode ser do seu banco (Santander, BBVA, CaixaBank, BPI, etc.)
-   - Certifique-se de que é um PDF com texto (não escaneado) ou Excel
+   - Certifique-se de que é um PDF com texto (não escaneado) ou Excel válido
 
 2. Colocar o arquivo na pasta 'data/samples/'
-   - Exemplo PDF: data/samples/extrato_janeiro.pdf
-   - Exemplo Excel: data/samples/extrato_janeiro.xlsx
+   - Exemplo: data/samples/extrato_janeiro.pdf
+   - Exemplo: data/samples/extrato_janeiro.xlsx
 
 3. Executar a análise:
    python main.py analyze data/samples/extrato_janeiro.pdf
-   python main.py analyze data/samples/extrato_janeiro.xlsx
 
 4. Para salvar o relatório:
    python main.py analyze data/samples/extrato_janeiro.pdf --output relatorio.txt
@@ -120,15 +123,16 @@ FORMATO ESPERADO DO PDF
 O sistema espera encontrar no PDF:
 - Data das transações (formato DD/MM/AAAA ou DD/MM)
 - Descrição da transação
-- Valor (com R$ ou indicação de C/D para crédito/débito)
+- Valor (com símbolo de moeda apropriado: €, R$, $, etc.)
 - Saldo (opcional)
 
 FORMATO ESPERADO DO EXCEL
 -------------------------
 O sistema espera encontrar no Excel:
-- Aba com transações (primeira aba será usada)
-- Cabeçalho com "Data Mov.", "Data Valor", "Descrição", "Valor", etc.
-- Colunas com datas e valores monetários
+- Coluna com datas das transações
+- Coluna com descrições
+- Coluna com valores (positivos para crédito, negativos para débito)
+- Cabeçalhos identificáveis (ex: "Data Mov.", "Descrição", "Valor")
 
 LIMITAÇÕES ATUAIS
 -----------------
@@ -140,49 +144,34 @@ LIMITAÇÕES ATUAIS
 PRÓXIMAS MELHORIAS
 ------------------
 - Integração com IA para melhor categorização
+- Suporte para mais formatos de arquivo
 - Detecção automática de padrões de bancos
 - Interface web
+- Análise de tendências temporais
+
+MOEDAS SUPORTADAS
+-----------------
+O sistema detecta automaticamente as seguintes moedas:
+- EUR (€) - Euro
+- BRL (R$) - Real Brasileiro
+- USD ($) - Dólar Americano
+- GBP (£) - Libra Esterlina
+- JPY (¥) - Iene Japonês
+- CHF - Franco Suíço
+- CAD (C$) - Dólar Canadense
+- AUD (A$) - Dólar Australiano
 """
     
-    with open(sample_file, 'w', encoding='utf-8') as f:
-        f.write(content)
-    
-    console.print(Panel.fit(
-        f"[bold green]✓ Arquivo de instruções criado![/bold green]\n\n"
-        f"📄 Local: {sample_file}\n\n"
-        f"[yellow]⚠️  Importante:[/yellow]\n"
-        f"Você precisa adicionar um PDF ou Excel de extrato real para testar.\n"
-        f"Leia as instruções no arquivo criado.",
-        title="Instruções de Teste"
-    ))
+    sample_file.write_text(content.strip(), encoding='utf-8')
+    console.print(f"[green]✓ Arquivo de exemplo criado em: {sample_file}[/green]")
 
 
 @cli.command()
-def info():
-    """Mostra informações sobre o sistema."""
-    table = Table(title="Sistema de Análise de Extratos Bancários")
-    
-    table.add_column("Componente", style="cyan", no_wrap=True)
-    table.add_column("Status", style="green")
-    table.add_column("Descrição", style="white")
-    
-    table.add_row("Leitor PDF", "✓ Implementado", "Extrai dados de PDFs bancários")
-    table.add_row("Leitor Excel", "✓ Implementado", "Extrai dados de arquivos Excel")
-    table.add_row("Categorizador", "✓ Implementado", "Categoriza por palavras-chave")
-    table.add_row("Analisador", "✓ Implementado", "Gera insights e alertas")
-    table.add_row("Relatórios", "✓ Implementado", "Texto e Markdown")
-    table.add_row("IA", "⏳ Planejado", "Integração com GPT/Claude")
-    
-    console.print(table)
-    
-    console.print("\n[bold]Categorias suportadas:[/bold]")
-    categories = [
-        "Alimentação", "Transporte", "Moradia", "Saúde", 
-        "Educação", "Lazer", "Compras", "Serviços",
-        "Transferência", "Investimento", "Salário"
-    ]
-    for cat in categories:
-        console.print(f"  • {cat}")
+def version():
+    """Mostra a versão do sistema."""
+    console.print("[bold blue]Sistema de Análise de Extratos Bancários[/bold blue]")
+    console.print("Versão: 1.0.0")
+    console.print("Desenvolvido para análise automatizada de extratos bancários")
 
 
 if __name__ == '__main__':
