@@ -157,6 +157,11 @@ src/
 └── presentation/    # Interface com o usuário (CLI)
 ```
 
+### Nota sobre Histórico de Desenvolvimento
+- O registro de histórico (dev_history.md) é gerenciado exclusivamente pelas rules do CodeLLM em `.codellm/rules/01-historico_desenvolvimento.mdc`.
+- O servidor MCP e os componentes em `mcp_system/` não escrevem nem leem o dev_history.md.
+- A pasta `mcp_system/` é intencionalmente excluída do histórico pela regra.
+
 ### Adicionando Suporte a Novos Bancos
 
 1. Atualize o arquivo `src/infrastructure/readers/pdf_reader_config.json` com padrões específicos do banco

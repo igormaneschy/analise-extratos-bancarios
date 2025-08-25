@@ -510,15 +510,6 @@ class EnhancedCodeIndexer:
                 sys.stderr.write(f"⚠️  Erro ao inicializar auto-indexação: {e}\n")
                 self.enable_auto_indexing = False
 
-        # Inicializa o gerenciador de histórico de desenvolvimento
-        try:
-            from src.utils.dev_history import dev_history_manager
-            self.dev_history_manager = dev_history_manager
-        except ImportError:
-            import sys
-            sys.stderr.write("⚠️  Erro ao inicializar gerenciador de histórico\n")
-            self.dev_history_manager = None
-
         # Lock para thread safety
         self._lock = threading.RLock()
 
@@ -531,27 +522,6 @@ class EnhancedCodeIndexer:
 
                 # Reindexar usando indexador base
                 result = self.index_files(file_paths, show_progress=False)
-
-                # Registra as mudanças no histórico de desenvolvimento
-                if self.dev_history_manager:
-                    try:
-                        # Filtra arquivos que devem ser rastreados
-                        tracked_files = [f for f in file_paths if self.dev_history_manager.should_track_file(f)]
-                        if tracked_files:
-                            self.dev_history_manager.update_history(
-                                file_paths=tracked_files,
-                                action_type="Refatoração",
-                                description="Atualização automática de arquivos detectada pelo sistema de auto-indexação.",
-                                details={
-                                    "Problema": "Arquivos do projeto foram modificados e precisam ser reindexados",
-                                    "Causa": f"Modificação detectada em {len(tracked_files)} arquivo(s) pelo sistema de monitoramento",
-                                    "Solução": "Reindexação automática realizada e registro no histórico de desenvolvimento",
-                                    "Observações": f"Arquivos atualizados: {', '.join(tracked_files)}"
-                                }
-                            )
-                    except Exception as e:
-                        import sys
-                        sys.stderr.write(f"⚠️  Erro ao registrar no histórico: {e}\n")
 
                 # Mensagens de debug via stderr para não interferir com protocolo MCP
                 import sys

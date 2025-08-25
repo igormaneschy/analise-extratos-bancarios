@@ -54,16 +54,6 @@ except ImportError as e:
         sys.stderr.write(f"[mcp_server_enhanced] ❌ Erro crítico: {e2}\n")
         raise
 
-# Importa o gerenciador de histórico de desenvolvimento
-try:
-    from src.utils.dev_history import dev_history_manager
-    HAS_DEV_HISTORY = True
-    sys.stderr.write("[mcp_server_enhanced] ✅ Sistema de histórico de desenvolvimento carregado\n")
-except ImportError as e:
-    sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Sistema de histórico de desenvolvimento não disponível: {e}\n")
-    HAS_DEV_HISTORY = False
-    dev_history_manager = None
-
 HAS_ENHANCED_FEATURES = HAS_ENHANCED
 
 # Config / instâncias
@@ -107,35 +97,6 @@ def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exc
                 [path],
                 recursive=recursive
             )
-
-        # Registra a operação no histórico de desenvolvimento
-        if HAS_DEV_HISTORY and dev_history_manager:
-            try:
-                # Determina os arquivos que foram indexados
-                indexed_files = []
-                if isinstance(result, dict) and 'files_processed' in result:
-                    indexed_files = result['files_processed']
-                elif isinstance(result, dict) and 'indexed_files' in result:
-                    indexed_files = result['indexed_files']
-
-                # Registra apenas se houve arquivos indexados
-                if indexed_files:
-                    # Filtra arquivos que devem ser rastreados
-                    tracked_files = [f for f in indexed_files if dev_history_manager.should_track_file(f)]
-                    if tracked_files:
-                        dev_history_manager.update_history(
-                            file_paths=tracked_files,
-                            action_type="Melhoria",
-                            description="Indexação de arquivos para busca semântica e contexto.",
-                            details={
-                                "Problema": "Necessidade de indexar arquivos para busca semântica",
-                                "Causa": f"Requisição de indexação do caminho '{path}'",
-                                "Solução": f"Indexação realizada de {len(tracked_files)} arquivo(s) para busca semântica",
-                                "Observações": f"Caminho indexado: {path}, Recursivo: {recursive}"
-                            }
-                        )
-            except Exception as e:
-                sys.stderr.write(f"⚠️  Erro ao registrar indexação no histórico: {e}\n")
 
         return result
 
@@ -382,21 +343,10 @@ else:
                 }
             ),
             Tool(
-                name="get_dev_history",
-                description="Recupera o histórico completo de desenvolvimento",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {"type": "integer", "default": 50},
-                        "full_history": {"type": "boolean", "default": False}
-                    }
-                }
-            ),
-            Tool(
                 name="auto_index",
                 description="Controla sistema de auto-indexação (start/stop/status)",
                 inputSchema={
-                    "type": "object", 
+                    "type": "object",
                     "properties": {
                         "action": {"type": "string", "default": "status"},
                         "paths": {"type": "array", "items": {"type": "string"}},
@@ -408,28 +358,6 @@ else:
                 name="get_stats",
                 description="Obtém estatísticas do indexador",
                 inputSchema={"type": "object", "properties": {}}
-            ),
-            Tool(
-                name="cache_management",
-                description="Gerencia caches (clear/status)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "default": "status"},
-                        "cache_type": {"type": "string", "default": "all"}
-                    }
-                }
-            ),
-            Tool(
-                name="get_dev_history",
-                description="Obtém histórico de desenvolvimento",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "limit": {"type": "integer", "default": 50},
-                        "full_history": {"type": "boolean", "default": False}
-                    }
-                }
             )
         ]
 
@@ -438,7 +366,7 @@ else:
         if name == "index_path":
             result = _handle_index_path(
                 arguments.get("path", "."),
-                arguments.get("recursive", True), 
+                arguments.get("recursive", True),
                 arguments.get("enable_semantic", True),
                 arguments.get("auto_start_watcher", False),
                 arguments.get("exclude_globs")
@@ -470,68 +398,12 @@ else:
                 arguments.get("action", "status"),
                 arguments.get("cache_type", "all")
             )
-        elif name == "get_dev_history":
-            if not HAS_DEV_HISTORY or not dev_history_manager:
-                result = {"status": "error", "error": "Development history feature not available"}
-            else:
-                result = dev_history_manager.get_history(
-                    limit=arguments.get("limit", 50),
-                    full_history=arguments.get("full_history", False)
-                )
-        elif name == "cache_management":
-            result = _handle_cache_management(
-                arguments.get("action", "status"),
-                arguments.get("cache_type", "all")
-            )
         else:
             result = {"status": "error", "error": f"Tool {name} not found"}
 
         return [TextContent(type="text", text=str(result))]
 
 # ===== INICIALIZAÇÃO DO SERVIDOR =====
-
-def _handle_get_dev_history(limit: int = 50, full_history: bool = False):
-    """Handler para recuperar o histórico de desenvolvimento"""
-    try:
-        import os
-
-        # Determina qual arquivo usar
-        history_file = "dev_history_full.md" if full_history and os.path.exists("dev_history_full.md") else "dev_history.md"
-
-        if not os.path.exists(history_file):
-            return {"status": "error", "error": f"Arquivo {history_file} não encontrado"}
-
-        with open(history_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-
-        # Retorna as últimas 'limit' entradas (ou todas se limit for 0)
-        if limit > 0:
-            # Conta o número de entradas (linhas que começam com [)
-            entry_count = 0
-            entry_lines = []
-
-            # Processa de trás para frente para pegar as últimas entradas
-            for line in reversed(lines):
-                if line.strip().startswith("[") and " - " in line and entry_count < limit:
-                    entry_count += 1
-                entry_lines.append(line)
-
-            # Inverte novamente para manter a ordem cronológica
-            content = "".join(reversed(entry_lines))
-        else:
-            content = "".join(lines)
-
-        return {
-            "status": "success",
-            "history_file": history_file,
-            "content": content,
-            "entry_count": content.count("[2025-")  # Aproximação do número de entradas
-        }
-
-    except Exception as e:
-        import sys
-        sys.stderr.write(f"❌ [get_dev_history] Erro: {str(e)}\n")
-        return {"status": "error", "error": str(e)}
 
 if __name__ == "__main__":
     # Log de inicialização
@@ -544,13 +416,94 @@ if __name__ == "__main__":
     else:
         sys.stderr.write("⚠️  [mcp_server_enhanced] Recursos básicos apenas\n")
         sys.stderr.write("   💡 Instale sentence-transformers e watchdog para recursos completos\n")
-    
+
     sys.stderr.write("✅ [mcp_server_enhanced] Servidor MCP melhorado iniciado\n")
     sys.stderr.write(f"   📍 Índice: {INDEX_DIR}\n")
     sys.stderr.write(f"   📁 Repositório: {INDEX_ROOT}\n")
     sys.stderr.write(f"   🧠 Busca semântica: {'Disponível' if HAS_ENHANCED_FEATURES else 'Indisponível'}\n")
     sys.stderr.write(f"   👁️  Auto-indexação: {'Disponível' if HAS_ENHANCED_FEATURES else 'Indisponível'}\n")
-    
+
+    # ===== INDEXAÇÃO AUTOMÁTICA NA INICIALIZAÇÃO =====
+    def check_needs_initial_indexing():
+        """Verifica se precisa fazer indexação inicial"""
+        index_path = os.path.join(INDEX_DIR, "chunks.jsonl")
+        inverted_path = os.path.join(INDEX_DIR, "inverted.json")
+
+        # Se não existem arquivos de índice, precisa indexar
+        if not os.path.exists(index_path) or not os.path.exists(inverted_path):
+            return True
+
+        # Se os arquivos existem mas estão vazios, precisa indexar
+        try:
+            if os.path.getsize(index_path) == 0 or os.path.getsize(inverted_path) == 0:
+                return True
+        except OSError:
+            return True
+
+        return False
+
+    def perform_initial_indexing():
+        """Executa indexação inicial do repositório"""
+        sys.stderr.write("🔍 [startup] Executando indexação inicial do repositório...\n")
+
+        try:
+            # Define padrões de exclusão padrão
+            default_exclude_globs = [
+                "**/.git/**",
+                "**/node_modules/**",
+                "**/__pycache__/**",
+                "**/dist/**",
+                "**/build/**",
+                "**/.venv/**",
+                "**/venv/**",
+                "**/.env",
+                "**/.*cache/**",
+                "**/*.pyc",
+                "**/*.pyo",
+                "**/*.pyd",
+                "**/.*"
+            ]
+
+            # Executa indexação usando a função handler
+            result = _handle_index_path(
+                path=".",
+                recursive=True,
+                enable_semantic=HAS_ENHANCED_FEATURES,
+                auto_start_watcher=HAS_ENHANCED_FEATURES,
+                exclude_globs=default_exclude_globs
+            )
+
+            if result.get("status") == "success":
+                indexed_files = result.get("indexed_files", 0)
+                total_chunks = result.get("total_chunks", 0)
+                sys.stderr.write(f"✅ [startup] Indexação inicial concluída!\n")
+                sys.stderr.write(f"   📄 Arquivos indexados: {indexed_files}\n")
+                sys.stderr.write(f"   🧩 Chunks criados: {total_chunks}\n")
+
+                if HAS_ENHANCED_FEATURES and result.get("auto_indexing") == "started":
+                    sys.stderr.write("   👁️  Auto-indexação iniciada para mudanças futuras\n")
+            else:
+                sys.stderr.write(f"⚠️  [startup] Indexação inicial com problemas: {result.get('error', 'Erro desconhecido')}\n")
+
+        except Exception as e:
+            sys.stderr.write(f"❌ [startup] Erro na indexação inicial: {str(e)}\n")
+            sys.stderr.write("   💡 O servidor continuará funcionando, mas será necessário indexar manualmente\n")
+
+    # Verifica se precisa fazer indexação inicial
+    if check_needs_initial_indexing():
+        sys.stderr.write("🔍 [startup] Índice não encontrado ou vazio - iniciando indexação automática\n")
+        perform_initial_indexing()
+    else:
+        sys.stderr.write("✅ [startup] Índice existente encontrado - carregando dados\n")
+
+        # Mesmo com índice existente, inicia auto-indexação se disponível
+        if HAS_ENHANCED_FEATURES and hasattr(_indexer, 'start_auto_indexing'):
+            try:
+                _indexer.start_auto_indexing()
+                sys.stderr.write("👁️  [startup] Auto-indexação iniciada para mudanças futuras\n")
+            except Exception as e:
+                sys.stderr.write(f"⚠️  [startup] Não foi possível iniciar auto-indexação: {str(e)}\n")
+
     # Executa servidor com a API correta
     if HAS_FASTMCP:
         # FastMCP não usa stdio=True, executa diretamente
