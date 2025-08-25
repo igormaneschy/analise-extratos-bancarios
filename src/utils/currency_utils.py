@@ -34,28 +34,29 @@ class CurrencyUtils:
     def detect_currency_from_text(cls, text: str) -> str:
         """
         Detecta a moeda a partir de um texto.
-        
+
         Args:
             text: Texto para análise
-            
+
         Returns:
             Código da moeda (ex: 'EUR', 'BRL', 'USD') ou 'EUR' como padrão
         """
         if not text:
             return 'EUR'
-            
+
         text = str(text).upper()
-        
+
         # Procura por padrões de moeda
         for pattern, currency in cls.CURRENCY_PATTERNS:
             if re.search(pattern, text, re.IGNORECASE):
                 return currency
-        
-        # Procura por códigos de moeda explícitos
+
+        # Procura por códigos de moeda explícitos (mas apenas como palavras completas)
         for currency_code in cls.CURRENCY_SYMBOLS.keys():
-            if currency_code in text:
+            # Usar \b para delimitar palavras completas
+            if re.search(r'\b' + re.escape(currency_code) + r'\b', text):
                 return currency_code
-        
+
         # Padrão para Europa (assume EUR se não encontrar nada)
         return 'EUR'
     
@@ -101,23 +102,32 @@ class CurrencyUtils:
     def extract_currency_from_dataframe(cls, df) -> str:
         """
         Extrai a moeda de um DataFrame do pandas.
-        
+
         Args:
             df: DataFrame para análise
-            
+
         Returns:
-            Código da moeda detectada
+            Código da moeda detectada ou None se não detectada
         """
         import pandas as pd
-        
+
         # Converte todo o DataFrame para string e procura por padrões
         text_content = ""
-        
+
         # Analisa as primeiras 20 linhas para detectar moeda
         for idx in range(min(20, len(df))):
             row = df.iloc[idx]
             for col in row:
                 if pd.notna(col):
                     text_content += str(col) + " "
-        
-        return cls.detect_currency_from_text(text_content)
+
+        currency = cls.detect_currency_from_text(text_content)
+
+        # Lista de moedas padrão para aceitar mesmo que não estejam explicitamente no texto
+        default_currencies = ['EUR', 'BRL', 'USD', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD']
+
+        # Retorna None se a moeda detectada não estiver explicitamente no texto,
+        # exceto para moedas padrão
+        if currency and (currency not in text_content) and (currency not in default_currencies):
+            return None
+        return currency

@@ -13,12 +13,14 @@ from mcp.client.stdio import stdio_client
 async def get_stats():
     """Obtém estatísticas do servidor MCP"""
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    server_path = os.path.join(base_dir, 'mcp_server_enhanced.py')
 
     server_params = StdioServerParameters(
         command="python",
-        args=["-u", server_path],
-        env={"INDEX_DIR": ".mcp_index", "INDEX_ROOT": base_dir}
+        args=["-u", "-m", "mcp_system.mcp_server_enhanced"],
+        env={
+            "INDEX_DIR": os.path.join(base_dir, ".mcp_index"),
+            "INDEX_ROOT": os.path.abspath(os.path.join(base_dir, '..'))
+        }
     )
 
     max_retries = 10

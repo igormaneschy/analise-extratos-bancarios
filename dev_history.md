@@ -1,99 +1,99 @@
-[2025-08-13] - Assistant
-Arquivos: src/infrastructure/readers/csv_reader.py, src/application/use_cases.py, main.py, README.md, tests/test_csv_reader.py, tests/test_comprehensive_suite.py, data/samples/extrato_exemplo.csv
+[2025-08-25] - Assistant
+Arquivos: mcp_system/embeddings/semantic_search.py
 Ação/Tipo: Melhoria
-Descrição: Implementa suporte ao formato CSV para leitura de extratos bancários.
+Descrição: Implementa lazy-load do modelo de embeddings para reduzir latência de startup.
 Detalhes:
-Problema: Sistema só suportava PDF e Excel
-Causa: Necessidade de suportar mais formatos de entrada
-Solução: Implementação do CSVStatementReader com detecção automática de colunas e moeda
-Observações: Adicionados testes específicos para o leitor CSV e atualização da documentação
+Problema: Tempo de inicialização elevado devido ao carregamento do SentenceTransformer no startup.
+Causa: Modelo era inicializado no __init__ do SemanticSearchEngine.
+Solução: Removida inicialização no __init__; adicionada inicialização sob demanda em get_embedding, search_similar e hybrid_search (já chamava _initialize_model). Mantidos logs de carregamento via stderr.
+Observações: Caso sentence-transformers não esteja instalado, funções fazem fallback silencioso para BM25.
 
-[2025-08-13] - Assistant
-Arquivos: src/services/transaction_analyzer.py, src/domain/models.py
-Ação/Tipo: Melhoria
-Descrição: Integra modelo de ML para detecção de padrões de gasto e anomalias.
-Detalhes:
-Problema: Regras atuais não capturavam padrões complexos
-Causa: Algoritmo baseado apenas em heurísticas simples
-Solução: Integração de modelo de detecção de padrões e anomalias
-Observações: Acurácia preliminar de 87% em dados de 6 meses
-
-[2025-08-12] - Assistant
-Arquivos: src/utils/currency_utils.py, src/domain/models.py, src/infrastructure/readers/excel_reader.py, src/infrastructure/analyzers/basic_analyzer.py, src/infrastructure/reports/text_report.py, main.py
-Ação/Tipo: Melhoria
-Descrição: Implementa detecção automática de moeda e formatação dinâmica.
-Detalhes:
-Problema: Sistema estava hardcoded para EUR
-Causa: Necessidade de suportar múltiplas moedas
-Solução: Detecção automática de moeda (EUR, BRL, USD, GBP, JPY, CHF, CAD, AUD) e formatação dinâmica
-Observações: Cobertura de testes para módulo de moeda atingiu 97%
-
-[2025-08-11] - Assistant
-Arquivos: tests/test_currency_utils.py, tests/test_suite.py, tests/test_comprehensive_suite.py
-Ação/Tipo: Teste
-Descrição: Adiciona testes abrangentes para utilitários de moeda e atualiza testes existentes.
-Detalhes:
-Problema: Cobertura de testes insuficiente
-Causa: Falta de testes para novas funcionalidades
-Solução: Implementação de testes unitários e de integração
-Observações: Cobertura geral aumentada para 85%
-
-[2025-08-10] - Assistant
-Arquivos: src/infrastructure/reports/text_report.py
+[2025-08-25] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
 Ação/Tipo: Correção
-Descrição: Corrige formatação de valores monetários em relatórios de texto.
+Descrição: Corrige NameError por falta de import de threading e remove duplicações no disparo da indexação inicial.
 Detalhes:
-Problema: Valores monetários não estavam sendo formatados corretamente
-Causa: Uso de formatação hardcoded para Euro
-Solução: Implementação de formatação dinâmica baseada na moeda do extrato
-Observações: Agora suporta formatação adequada para diferentes moedas
+Problema: Erro NameError: 'threading' is not defined ao iniciar thread de indexação inicial e duplicidade de chamadas.
+Causa: Ausência de import threading e múltiplas tentativas de iniciar a thread (helper redundante e no main fallback).
+Solução: Importado threading, consolidado _initial_index() e disparo único em cada caminho (FastMCP e fallback), removendo duplicações.
+Observações: Initialize não é bloqueado; logs informam progresso da indexação.
 
-[2025-08-09] - Assistant
-Arquivos: src/domain/models.py, src/infrastructure/analyzers/basic_analyzer.py
+[2025-08-25] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
 Ação/Tipo: Melhoria
-Descrição: Adiciona propriedades de totais ao modelo AnalysisResult e melhora cálculos.
+Descrição: Ativa indexação automática no início do servidor com opções via variáveis de ambiente.
 Detalhes:
-Problema: Cálculos de totais estavam espalhados
-Causa: Falta de centralização dos cálculos
-Solução: Adição de propriedades income, expenses e balance ao AnalysisResult
-Observações: Simplificação do código de análise com melhor reusabilidade
+Problema: Era necessário chamar manualmente index_path antes de usar o servidor; sem indexação inicial, as primeiras buscas retornavam vazio.
+Causa: Ausência de rotina de indexação no startup do servidor.
+Solução: Implementada função _initial_index() e disparo em thread daemon no startup (FastMCP e fallback). Variáveis de ambiente: AUTO_INDEX_ON_START (default=1), AUTO_INDEX_PATHS (default=.), AUTO_INDEX_RECURSIVE (default=1), AUTO_ENABLE_SEMANTIC (default=1), AUTO_START_WATCHER (default=1).
+Observações: Execução em background evita bloquear a handshake initialize do MCP.
 
-[2025-08-08] - Assistant
-Arquivos: src/application/use_cases.py, main.py
-Ação/Tipo: Melhoria
-Descrição: Implementa seleção automática de leitor baseado no tipo de arquivo.
+[2025-08-25] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Correção
+Descrição: Corrige término prematuro do servidor FastMCP adicionando chamada de execução (mcp.run()).
 Detalhes:
-Problema: Sistema tinha leitores hardcoded
-Causa: Necessidade de suportar múltiplos formatos
-Solução: Implementação de mecanismo de detecção automática de formato
-Observações: Agora suporta PDF, Excel e futuros formatos de forma transparente
+Problema: Servidor encerrava antes de responder ao `initialize` quando FastMCP estava disponível.
+Causa: Bloco FastMCP não iniciava o loop de servidor (faltava chamada de `mcp.run()` no __main__).
+Solução: Adicionada execução condicional `if HAS_FASTMCP and __name__ == "__main__": mcp.run()` para manter o servidor em execução.
+Observações: Mantido fallback para MCP tradicional com asyncio.run(main()).
 
-[2025-08-07] - Assistant
-Arquivos: src/infrastructure/readers/excel_reader.py
-Ação/Tipo: Melhoria
-Descrição: Melhora extração de dados de arquivos Excel com detecção automática de moeda.
-Detalhes:
-Problema: Sistema só suportava Euro
-Causa: Necessidade de suportar múltiplas moedas
-Solução: Implementação de detecção automática de moeda em arquivos Excel
-Observações: Suporta USD, BRL, GBP além de EUR
-
-[2025-08-06] - Assistant
-Arquivos: src/domain/models.py, src/infrastructure/readers/pdf_reader.py
+[2025-08-25] - Assistant
+Arquivos: .vscode/mcp.json, mcp_system/mcp_server_enhanced.py, mcp_system/code_indexer_enhanced.py, mcp_system/embeddings/semantic_search.py
 Ação/Tipo: Refatoração
-Descrição: Adiciona campo de moeda aos modelos e melhora parsing de PDFs.
+Descrição: Encapsula totalmente o servidor MCP no pacote mcp_system e garante que o diretório .mcp_index fique sob mcp_system.
 Detalhes:
-Problema: Modelos não tinham suporte a moedas
-Causa: Necessidade de internacionalização
-Solução: Adição de campo currency aos modelos BankStatement e AnalysisResult
-Observações: Melhorias no parsing de valores monetários em PDFs
+Problema: Arquivos de índice (.mcp_index) eram criados na raiz e imports não eram estritamente relativos ao pacote, dificultando isolar o MCP como ferramenta separada.
+Causa: Configuração do .vscode/mcp.json apontava INDEX_DIR para .mcp_index na raiz e havia imports absolutos e paths relativos frágeis (../../) no código.
+Solução: Ajuste do .vscode/mcp.json para usar INDEX_DIR=mcp_system/.mcp_index; padronização de paths no código para usar CURRENT_DIR/CURRENT_DIR.parent; correção de imports para a forma relativa (from .module import ...); definição de defaults de index_dir/metrics/embeddings sob mcp_system.
+Observações: Compatível com CodeLLM (Abacus.ai) e execução automática do servidor MCP; métricas e embeddings também ficam contidos em mcp_system/.mcp_index.
 
-[2025-08-05] - Assistant
-Arquivos: main.py, src/application/use_cases.py, src/infrastructure/reports/text_report.py
-Ação/Tipo: Melhoria
-Descrição: Adiciona suporte a relatórios em Markdown e melhora interface CLI.
+[2025-04-05] - Assistant
+Arquivos: src/utils/currency_utils.py, src/infrastructure/readers/csv_reader.py, src/infrastructure/readers/excel_reader.py
+Ação/Tipo: Correção
+Descrição: Corrige erros na detecção de moeda e chamadas duplicadas em leitores de extratos.
 Detalhes:
-Problema: Sistema só gerava relatórios em texto simples
-Causa: Necessidade de formatos mais ricos
-Solução: Implementação de MarkdownReportGenerator e melhorias na CLI
-Observações: Nova opção --format markdown no comando analyze
+Problema: Erros de 'classmethod' object is not callable, NameError: name 'pd' is not defined e detecção incorreta de moeda (CAD em vez de EUR)
+Causa: Linhas em branco extras entre decoradores @classmethod, imports faltando no escopo correto e lógica de detecção de moeda muito permissiva
+Solução: Remoção de linhas em branco extras, movimentação do import pandas para o método extract_currency_from_dataframe e refinamento da lógica de detecção de moeda usando delimitadores de palavra
+Observações: Todos os testes passando após as correções
+
+[2025-04-05] - Assistant
+Arquivos: src/utils/currency_utils.py
+Ação/Tipo: Correção
+Descrição: Corrige erro de definição de método na classe CurrencyUtils.
+Detalhes:
+Problema: TypeError: 'classmethod' object is not callable ao chamar extract_currency_from_dataframe
+Causa: Linha em branco extra entre decoradores @classmethod na definição do método
+Solução: Remoção da linha em branco extra entre os decoradores @classmethod
+Observações: Problema identificado na definição do método extract_currency_from_dataframe
+
+[2025-04-05] - Assistant
+Arquivos: src/utils/currency_utils.py
+Ação/Tipo: Correção
+Descrição: Corrige erro de importação do pandas no método extract_currency_from_dataframe.
+Detalhes:
+Problema: NameError: name 'pd' is not defined ao executar o método extract_currency_from_dataframe
+Causa: O import pandas as pd não estava disponível no escopo do método
+Solução: Movimentação do import pandas como pd para dentro do método extract_currency_from_dataframe
+Observações: O import foi movido para garantir que esteja disponível no escopo correto
+
+[2025-04-05] - Assistant
+Arquivos: src/infrastructure/readers/csv_reader.py, src/infrastructure/readers/excel_reader.py
+Ação/Tipo: Correção
+Descrição: Remove chamadas duplicadas ao método extract_currency_from_dataframe.
+Detalhes:
+Problema: Chamadas duplicadas ao método extract_currency_from_dataframe em ambos os leitores
+Causa: Código redundante com chamadas repetidas ao mesmo método
+Solução: Remoção das chamadas duplicadas mantendo apenas a chamada inicial
+Observações: Melhoria de eficiência removendo processamento redundante
+
+[2025-04-05] - Assistant
+Arquivos: src/utils/currency_utils.py
+Ação/Tipo: Correção
+Descrição: Corrige lógica de detecção de moeda para evitar falsos positivos.
+Detalhes:
+Problema: Detecção incorreta de CAD em vez de EUR quando não há informações de moeda explícitas
+Causa: Procura por códigos de moeda como substrings simples, causando falsos positivos
+Solução: Uso de delimitadores de palavra (\b) para procurar apenas por códigos de moeda como palavras completas
+Observações: A detecção agora usa expressões regulares com \b para evitar encontrar códigos de moeda como substrings

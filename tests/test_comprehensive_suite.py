@@ -74,6 +74,33 @@ def test_excel_reader_currency_detection():
     except ImportError:
         pytest.fail("Não foi possível importar ExcelStatementReader")
 
+
+import pandas as pd
+from pathlib import Path
+import pytest
+
+def test_excel_reader_defaults_to_euro_if_no_currency(tmp_path):
+    # Cria um DataFrame com os cabeçalhos esperados pelo leitor Excel
+    data = {
+        'Data Mov.': ['01/01/2023', '02/01/2023'],
+        'Descrição': ['Salário', 'Supermercado'],
+        'Valor': [1000, -50]
+    }
+    df = pd.DataFrame(data)
+    excel_file = tmp_path / "test_no_currency.xlsx"
+    df.to_excel(excel_file, index=False)
+
+    try:
+        from src.infrastructure.readers.excel_reader import ExcelStatementReader
+    except ImportError:
+        pytest.fail("Não foi possível importar ExcelStatementReader")
+
+    reader = ExcelStatementReader()
+    statement = reader.read(excel_file)
+
+    # A moeda deve ser EUR por padrão
+    assert reader.currency == 'EUR'
+
 def test_csv_reader_import():
     """Testa a importação do leitor de CSV."""
     try:

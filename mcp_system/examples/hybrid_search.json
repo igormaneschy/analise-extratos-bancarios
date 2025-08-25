@@ -19,17 +19,14 @@
     "results": [
       {
         "chunk_id": "auth_service_py_123",
-        "score": 0.87,
-        "bm25_score": 0.65,
-        "semantic_score": 0.89,
-        "file_path": "src/auth/service.py",
-        "content": "def authenticate_user(token: str) -> User:...",
-        "start_line": 25,
-        "end_line": 45
+        "file_path": "src/services/auth_service.py",
+        "start_line": 45,
+        "end_line": 67,
+        "score": 0.876,
+        "preview": "def authenticate_user(token: str) -> User:\n    \"\"\"Autentica usuário com token JWT\"\"\"\n    try:\n        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])\n        user_id = payload.get('user_id')\n        return get_user_by_id(user_id)\n    except jwt.ExpiredSignatureError:\n        raise AuthenticationError('Token expirado')\n    except jwt.InvalidTokenError:\n        raise AuthenticationError('Token inválido')"
       }
     ],
-    "search_type": "hybrid",
-    "semantic_weight": 0.4,
-    "total_results": 10
+    "count": 1,
+    "status": "success"
   }
 }

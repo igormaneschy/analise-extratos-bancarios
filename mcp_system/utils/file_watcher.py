@@ -13,8 +13,12 @@ from typing import Set, Callable, Dict, Optional
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import pathlib
 
 import sys
+
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
 try:
     from watchdog.observers import Observer
@@ -38,7 +42,7 @@ class FileWatcher:
     """
     
     def __init__(self, 
-                 watch_path: str = ".",
+                 watch_path: str = str(CURRENT_DIR.parent.parent),
                  indexer_callback: Optional[Callable] = None,
                  debounce_seconds: float = 2.0,
                  include_extensions: Optional[Set[str]] = None):
@@ -270,7 +274,7 @@ class SimpleFileWatcher:
     """
     
     def __init__(self, 
-                 watch_path: str = ".",
+                 watch_path: str = str(CURRENT_DIR.parent.parent),
                  indexer_callback: Optional[Callable] = None,
                  poll_interval: float = 30.0,
                  include_extensions: Optional[Set[str]] = None):
@@ -395,7 +399,7 @@ class SimpleFileWatcher:
             **self.stats
         }
 
-def create_file_watcher(watch_path: str = ".", **kwargs) -> FileWatcher | SimpleFileWatcher:
+def create_file_watcher(watch_path: str = str(CURRENT_DIR.parent.parent), **kwargs) -> FileWatcher | SimpleFileWatcher:
     """
     Factory function que cria o melhor file watcher disponível
     """

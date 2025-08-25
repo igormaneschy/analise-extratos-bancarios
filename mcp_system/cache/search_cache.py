@@ -6,7 +6,12 @@ import json
 import hashlib
 import time
 from typing import Any, Dict, Optional
+import pathlib
+
 # Removendo imports não utilizados que podem causar problemas
+
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
 class SearchCache:
     """Sistema de cache para resultados de busca"""

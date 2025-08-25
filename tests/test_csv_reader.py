@@ -149,5 +149,28 @@ def test_csv_reader_find_column():
     assert reader._find_column(df, ['saldo', 'balance']) is None
 
 
+def test_csv_reader_defaults_to_euro_if_no_currency():
+    # Cria um DataFrame mínimo sem informação de moeda e sem valores que possam ser interpretados como CAD
+    data = {
+        'data': ['01/01/2023', '02/01/2023'],
+        'descricao': ['Salário', 'Supermercado'],
+        'valor': ['1000', '-50']
+    }
+    df = pd.DataFrame(data)
+
+    # Salva em um arquivo CSV temporário
+    temp_csv = Path('temp_test_no_currency.csv')
+    df.to_csv(temp_csv, index=False)
+
+    reader = CSVStatementReader()
+    statement = reader.read(temp_csv)
+
+    # A moeda deve ser EUR por padrão
+    assert getattr(reader, 'currency', None) == 'EUR'
+
+    # Limpa o arquivo temporário
+    temp_csv.unlink()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

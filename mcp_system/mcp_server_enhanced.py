@@ -7,6 +7,11 @@ Usando FastMCP para API simplificada com decorators
 import os
 import sys
 from typing import Any, Dict, List
+import pathlib
+import threading
+
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -25,7 +30,7 @@ except ImportError:
 
 # Importa funcionalidades melhoradas
 try:
-    from code_indexer_enhanced import (
+    from .code_indexer_enhanced import (
         EnhancedCodeIndexer,
         enhanced_search_code,
         enhanced_build_context_pack,
@@ -43,7 +48,7 @@ except ImportError as e:
 
     # Fallback para versão base integrada
     try:
-        from code_indexer_enhanced import (
+        from .code_indexer_enhanced import (
             BaseCodeIndexer,
             search_code,
             build_context_pack,
@@ -56,9 +61,9 @@ except ImportError as e:
 
 HAS_ENHANCED_FEATURES = HAS_ENHANCED
 
-# Config / instâncias
-INDEX_DIR = os.environ.get("INDEX_DIR", ".mcp_index")
-INDEX_ROOT = os.environ.get("INDEX_ROOT", os.getcwd())
+# Config / instâncias - agora usando caminhos relativos à pasta mcp_system
+INDEX_DIR = os.environ.get("INDEX_DIR", str(CURRENT_DIR / ".mcp_index"))
+INDEX_ROOT = os.environ.get("INDEX_ROOT", str(CURRENT_DIR.parent))
 
 if HAS_ENHANCED_FEATURES:
     _indexer = EnhancedCodeIndexer(
@@ -67,6 +72,49 @@ if HAS_ENHANCED_FEATURES:
     )
 else:
     _indexer = BaseCodeIndexer(index_dir=INDEX_DIR)
+
+# ===== CONFIG DE AUTO-INDEXAÇÃO NO START =====
+
+def _truthy(env_val: str, default: bool = False) -> bool:
+    if env_val is None:
+        return default
+    return str(env_val).strip().lower() in {"1", "true", "yes", "on"}
+
+AUTO_INDEX_ON_START = _truthy(os.environ.get("AUTO_INDEX_ON_START", "1"), True)
+AUTO_INDEX_PATHS = [p.strip() for p in os.environ.get("AUTO_INDEX_PATHS", ".").split(os.pathsep) if p.strip()]
+AUTO_INDEX_RECURSIVE = _truthy(os.environ.get("AUTO_INDEX_RECURSIVE", "1"), True)
+AUTO_ENABLE_SEMANTIC = _truthy(os.environ.get("AUTO_ENABLE_SEMANTIC", "1"), True)
+AUTO_START_WATCHER = _truthy(os.environ.get("AUTO_START_WATCHER", "1"), True)
+
+
+def _initial_index():
+    if not AUTO_INDEX_ON_START:
+        return
+    try:
+        sys.stderr.write("[mcp_server_enhanced] 🚀 Iniciando indexação automática inicial...\n")
+        abs_paths: List[str] = []
+        for p in AUTO_INDEX_PATHS:
+            abs_paths.append(p if os.path.isabs(p) else os.path.join(INDEX_ROOT, p))
+
+        if HAS_ENHANCED_FEATURES:
+            enhanced_index_repo_paths(
+                _indexer,
+                abs_paths,
+                recursive=AUTO_INDEX_RECURSIVE,
+                enable_semantic=AUTO_ENABLE_SEMANTIC,
+                exclude_globs=[]
+            )
+            if AUTO_START_WATCHER and hasattr(_indexer, 'start_auto_indexing'):
+                _indexer.start_auto_indexing()
+        else:
+            index_repo_paths(
+                _indexer,
+                abs_paths,
+                recursive=AUTO_INDEX_RECURSIVE
+            )
+        sys.stderr.write("[mcp_server_enhanced] ✅ Indexação inicial concluída\n")
+    except Exception as e:
+        sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Falha na indexação inicial: {e}\n")
 
 # ===== HANDLERS IMPLEMENTATION =====
 
@@ -89,7 +137,7 @@ def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exc
             )
 
             if auto_start_watcher and hasattr(_indexer, 'start_auto_indexing'):
-                _indexer.start_auto_indexing(paths=[path], recursive=recursive)
+                _indexer.start_auto_indexing()
                 result['auto_indexing'] = 'started'
         else:
             result = index_repo_paths(
@@ -172,7 +220,7 @@ def _handle_auto_index(action, paths, recursive):
             }
         
         if action == 'start':
-            _indexer.start_auto_indexing(paths=paths or [INDEX_ROOT], recursive=recursive)
+            _indexer.start_auto_indexing()
             return {'status': 'started', 'paths': paths}
         elif action == 'stop':
             _indexer.stop_auto_indexing()
@@ -237,13 +285,19 @@ if HAS_FASTMCP:
     # Cria servidor FastMCP
     mcp = FastMCP(name="code-indexer-enhanced")
 
+    # Dispara indexação inicial em background para não bloquear o initialize
+    try:
+        threading.Thread(target=_initial_index, daemon=True).start()
+    except Exception as e:
+        sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Não foi possível iniciar thread de indexação inicial: {e}\n")
+
     # ===== TOOLS BÁSICAS =====
 
     @mcp.tool()
-    def index_path(path: str = ".", 
-                   recursive: bool = True, 
-                   enable_semantic: bool = True, 
-                   auto_start_watcher: bool = False, 
+    def index_path(path: str = ".",
+                   recursive: bool = True,
+                   enable_semantic: bool = True,
+                   auto_start_watcher: bool = False,
                    exclude_globs: list = None) -> dict:
         """Indexa arquivos de código no caminho especificado"""
         return _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exclude_globs)
@@ -257,14 +311,14 @@ if HAS_FASTMCP:
         return _handle_search_code(query, limit, semantic_weight, use_mmr)
 
     @mcp.tool()
-    def context_pack(query: str, 
-                     token_budget: int = 8000, 
+    def context_pack(query: str,
+                     token_budget: int = 8000,
                      max_chunks: int = 20,
                      strategy: str = "mmr") -> dict:
         """Cria pacote de contexto otimizado para LLMs"""
         return _handle_context_pack(query, token_budget, max_chunks, strategy)
 
-    @mcp.tool() 
+    @mcp.tool()
     def auto_index(action: str = "status", paths: list = None, recursive: bool = True) -> dict:
         """Controla sistema de auto-indexação (start/stop/status)"""
         return _handle_auto_index(action, paths, recursive)
@@ -279,12 +333,24 @@ if HAS_FASTMCP:
         """Gerencia caches (clear/status)"""
         return _handle_cache_management(action, cache_type)
 
+    # Removido helper duplicado e chamada imediata; já iniciamos a thread acima
+    # def _start_initial_indexing_thread():
+    #     thread = threading.Thread(target=_initial_index, daemon=True)
+    #     thread.start()
+    # _start_initial_indexing_thread()
+
 else:
     # Fallback para MCP tradicional
     from mcp.server.stdio import stdio_server
     from mcp.types import Tool, TextContent
-    
+
     server = Server(name="code-indexer-enhanced")
+
+    # Dispara indexação inicial em background
+    try:
+        threading.Thread(target=_initial_index, daemon=True).start()
+    except Exception as e:
+        sys.stderr.write(f"[mcp_server_enhanced] ⚠️ Não foi possível iniciar thread de indexação inicial: {e}\n")
 
     @server.list_tools()
     async def list_tools():
@@ -299,12 +365,12 @@ else:
                         "recursive": {"type": "boolean", "default": True},
                         "enable_semantic": {"type": "boolean", "default": True},
                         "auto_start_watcher": {"type": "boolean", "default": False},
-                        "exclude_globs": {"type": "array", "items": {"type": "string"}}
+                        "exclude_globs": {"type": "array", "items": {"type": "string"}, "default": []}
                     }
                 }
             ),
             Tool(
-                name="search_code", 
+                name="search_code",
                 description="Busca código usando busca híbrida (BM25 + semântica)",
                 inputSchema={
                     "type": "object",
@@ -319,7 +385,7 @@ else:
             ),
             Tool(
                 name="context_pack",
-                description="Cria pacote de contexto otimizado para LLMs", 
+                description="Cria pacote de contexto otimizado para LLMs",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -332,24 +398,13 @@ else:
                 }
             ),
             Tool(
-                name="cache_management",
-                description="Gerencia caches (clear/status)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "action": {"type": "string", "default": "status"},
-                        "cache_type": {"type": "string", "default": "all"}
-                    },
-                }
-            ),
-            Tool(
                 name="auto_index",
                 description="Controla sistema de auto-indexação (start/stop/status)",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "default": "status"},
-                        "paths": {"type": "array", "items": {"type": "string"}},
+                        "paths": {"type": "array", "items": {"type": "string"}, "default": None},
                         "recursive": {"type": "boolean", "default": True}
                     }
                 }
@@ -357,158 +412,79 @@ else:
             Tool(
                 name="get_stats",
                 description="Obtém estatísticas do indexador",
-                inputSchema={"type": "object", "properties": {}}
+                inputSchema={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            Tool(
+                name="cache_management",
+                description="Gerencia caches (clear/status)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "default": "status"},
+                        "cache_type": {"type": "string", "default": "all"}
+                    }
+                }
             )
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict):
-        if name == "index_path":
-            result = _handle_index_path(
-                arguments.get("path", "."),
-                arguments.get("recursive", True),
-                arguments.get("enable_semantic", True),
-                arguments.get("auto_start_watcher", False),
-                arguments.get("exclude_globs")
-            )
-        elif name == "search_code":
-            result = _handle_search_code(
-                arguments["query"],
-                arguments.get("limit", 10),
-                arguments.get("semantic_weight", 0.3),
-                arguments.get("use_mmr", True)
-            )
-        elif name == "context_pack":
-            result = _handle_context_pack(
-                arguments["query"],
-                arguments.get("token_budget", 8000),
-                arguments.get("max_chunks", 20),
-                arguments.get("strategy", "mmr")
-            )
-        elif name == "auto_index":
-            result = _handle_auto_index(
-                arguments.get("action", "status"),
-                arguments.get("paths"),
-                arguments.get("recursive", True)
-            )
-        elif name == "get_stats":
-            result = _handle_get_stats()
-        elif name == "cache_management":
-            result = _handle_cache_management(
-                arguments.get("action", "status"),
-                arguments.get("cache_type", "all")
-            )
-        else:
-            result = {"status": "error", "error": f"Tool {name} not found"}
-
-        return [TextContent(type="text", text=str(result))]
-
-# ===== INICIALIZAÇÃO DO SERVIDOR =====
-
-if __name__ == "__main__":
-    # Log de inicialização
-    sys.stderr.write("🔄 Iniciando servidor MCP melhorado...\n")
-
-    # Mostra status das funcionalidades
-    if HAS_ENHANCED_FEATURES:
-        sys.stderr.write("✅ Sistema de busca semântica ativado\n")
-        sys.stderr.write("✅ Sistema de auto-indexação ativado\n")
-    else:
-        sys.stderr.write("⚠️  [mcp_server_enhanced] Recursos básicos apenas\n")
-        sys.stderr.write("   💡 Instale sentence-transformers e watchdog para recursos completos\n")
-
-    sys.stderr.write("✅ [mcp_server_enhanced] Servidor MCP melhorado iniciado\n")
-    sys.stderr.write(f"   📍 Índice: {INDEX_DIR}\n")
-    sys.stderr.write(f"   📁 Repositório: {INDEX_ROOT}\n")
-    sys.stderr.write(f"   🧠 Busca semântica: {'Disponível' if HAS_ENHANCED_FEATURES else 'Indisponível'}\n")
-    sys.stderr.write(f"   👁️  Auto-indexação: {'Disponível' if HAS_ENHANCED_FEATURES else 'Indisponível'}\n")
-
-    # ===== INDEXAÇÃO AUTOMÁTICA NA INICIALIZAÇÃO =====
-    def check_needs_initial_indexing():
-        """Verifica se precisa fazer indexação inicial"""
-        index_path = os.path.join(INDEX_DIR, "chunks.jsonl")
-        inverted_path = os.path.join(INDEX_DIR, "inverted.json")
-
-        # Se não existem arquivos de índice, precisa indexar
-        if not os.path.exists(index_path) or not os.path.exists(inverted_path):
-            return True
-
-        # Se os arquivos existem mas estão vazios, precisa indexar
+    async def call_tool(name: str, arguments: Dict[str, Any] = None):
+        arguments = arguments or {}
         try:
-            if os.path.getsize(index_path) == 0 or os.path.getsize(inverted_path) == 0:
-                return True
-        except OSError:
-            return True
-
-        return False
-
-    def perform_initial_indexing():
-        """Executa indexação inicial do repositório"""
-        sys.stderr.write("🔍 [startup] Executando indexação inicial do repositório...\n")
-
-        try:
-            # Define padrões de exclusão padrão
-            default_exclude_globs = [
-                "**/.git/**",
-                "**/node_modules/**",
-                "**/__pycache__/**",
-                "**/dist/**",
-                "**/build/**",
-                "**/.venv/**",
-                "**/venv/**",
-                "**/.env",
-                "**/.*cache/**",
-                "**/*.pyc",
-                "**/*.pyo",
-                "**/*.pyd",
-                "**/.*"
-            ]
-
-            # Executa indexação usando a função handler
-            result = _handle_index_path(
-                path=".",
-                recursive=True,
-                enable_semantic=HAS_ENHANCED_FEATURES,
-                auto_start_watcher=HAS_ENHANCED_FEATURES,
-                exclude_globs=default_exclude_globs
-            )
-
-            if result.get("status") == "success":
-                indexed_files = result.get("indexed_files", 0)
-                total_chunks = result.get("total_chunks", 0)
-                sys.stderr.write(f"✅ [startup] Indexação inicial concluída!\n")
-                sys.stderr.write(f"   📄 Arquivos indexados: {indexed_files}\n")
-                sys.stderr.write(f"   🧩 Chunks criados: {total_chunks}\n")
-
-                if HAS_ENHANCED_FEATURES and result.get("auto_indexing") == "started":
-                    sys.stderr.write("   👁️  Auto-indexação iniciada para mudanças futuras\n")
+            if name == "index_path":
+                return _handle_index_path(
+                    arguments.get("path", "."),
+                    arguments.get("recursive", True),
+                    arguments.get("enable_semantic", True),
+                    arguments.get("auto_start_watcher", False),
+                    arguments.get("exclude_globs", None)
+                )
+            elif name == "search_code":
+                return _handle_search_code(
+                    arguments.get("query"),
+                    arguments.get("limit", 10),
+                    arguments.get("semantic_weight", 0.3),
+                    arguments.get("use_mmr", True)
+                )
+            elif name == "context_pack":
+                return _handle_context_pack(
+                    arguments.get("query"),
+                    arguments.get("token_budget", 8000),
+                    arguments.get("max_chunks", 20),
+                    arguments.get("strategy", "mmr")
+                )
+            elif name == "auto_index":
+                return _handle_auto_index(
+                    arguments.get("action", "status"),
+                    arguments.get("paths", None),
+                    arguments.get("recursive", True)
+                )
+            elif name == "get_stats":
+                return _handle_get_stats()
+            elif name == "cache_management":
+                return _handle_cache_management(
+                    arguments.get("action", "status"),
+                    arguments.get("cache_type", "all")
+                )
             else:
-                sys.stderr.write(f"⚠️  [startup] Indexação inicial com problemas: {result.get('error', 'Erro desconhecido')}\n")
-
+                return {"status": "error", "error": f"Ferramenta desconhecida: {name}"}
         except Exception as e:
-            sys.stderr.write(f"❌ [startup] Erro na indexação inicial: {str(e)}\n")
-            sys.stderr.write("   💡 O servidor continuará funcionando, mas será necessário indexar manualmente\n")
+            return {"status": "error", "error": str(e)}
 
-    # Verifica se precisa fazer indexação inicial
-    if check_needs_initial_indexing():
-        sys.stderr.write("🔍 [startup] Índice não encontrado ou vazio - iniciando indexação automática\n")
-        perform_initial_indexing()
-    else:
-        sys.stderr.write("✅ [startup] Índice existente encontrado - carregando dados\n")
+    # Iniciar servidor
+    async def main():
+        # Removido: já iniciamos a thread antes
+        # threading.Thread(target=_initial_index, daemon=True).start()
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server_name="code-indexer-enhanced")
 
-        # Mesmo com índice existente, inicia auto-indexação se disponível
-        if HAS_ENHANCED_FEATURES and hasattr(_indexer, 'start_auto_indexing'):
-            try:
-                _indexer.start_auto_indexing()
-                sys.stderr.write("👁️  [startup] Auto-indexação iniciada para mudanças futuras\n")
-            except Exception as e:
-                sys.stderr.write(f"⚠️  [startup] Não foi possível iniciar auto-indexação: {str(e)}\n")
-
-    # Executa servidor com a API correta
-    if HAS_FASTMCP:
-        # FastMCP não usa stdio=True, executa diretamente
-        mcp.run()
-    else:
-        # MCP tradicional usa stdio_server
+    if __name__ == "__main__":
         import asyncio
-        asyncio.run(stdio_server(server))
+        asyncio.run(main())
+
+if HAS_FASTMCP and __name__ == "__main__":
+    # Executa o servidor FastMCP quando disponível
+    mcp.run()

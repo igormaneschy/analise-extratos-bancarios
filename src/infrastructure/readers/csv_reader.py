@@ -31,14 +31,16 @@ class CSVStatementReader(StatementReader):
         try:
             # Lê o arquivo CSV
             df = pd.read_csv(file_path, encoding='utf-8')
-            
+
             # Detecta a moeda automaticamente
             detected_currency = CurrencyUtils.extract_currency_from_dataframe(df)
+            if not detected_currency:
+                detected_currency = "EUR"
             self.currency = detected_currency
-            
+
             # Extrai as transações do DataFrame
             transactions = self._extract_transactions(df)
-            
+
             # Cria o extrato bancário
             statement = BankStatement(
                 bank_name=self._extract_bank_name(df),
@@ -50,22 +52,22 @@ class CSVStatementReader(StatementReader):
                 currency=self.currency,  # Usa a moeda detectada
                 transactions=transactions
             )
-            
+
             return statement
-            
+
         except Exception as e:
             raise ParsingError(f"Erro ao ler o arquivo CSV: {str(e)}")
-    
+
     def _extract_transactions(self, df: pd.DataFrame) -> List[Transaction]:
         """Extrai as transações do DataFrame."""
         transactions = []
-        
+
         # Procura colunas comuns em extratos CSV
         date_col = self._find_column(df, ['data', 'date', 'data transacao', 'transaction date'])
         description_col = self._find_column(df, ['descricao', 'description', 'descrição'])
         amount_col = self._find_column(df, ['valor', 'amount', 'value', 'montante'])
         balance_col = self._find_column(df, ['saldo', 'balance', 'saldo após', 'balance after'])
-        
+
         if not date_col or not description_col or not amount_col:
             raise ParsingError("Não foi possível identificar as colunas necessárias no CSV")
         

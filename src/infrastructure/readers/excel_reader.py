@@ -35,8 +35,10 @@ class ExcelStatementReader(StatementReader):
             
             # Detecta a moeda automaticamente
             detected_currency = CurrencyUtils.extract_currency_from_dataframe(df)
+            if not detected_currency:
+                detected_currency = "EUR"
             self.currency = detected_currency
-            
+
             # Extrai as transações do DataFrame
             transactions = self._extract_transactions(df)
             
@@ -49,69 +51,77 @@ class ExcelStatementReader(StatementReader):
                 initial_balance=self._extract_initial_balance(df),
                 final_balance=self._extract_final_balance(df),
                 currency=self.currency,  # Usa a moeda detectada
-                transactions=transactions,
-                metadata={"currency": self.currency, "source_file": str(file_path)}
+                transactions=transactions
             )
-            
+
             return statement
-            
+
         except Exception as e:
             raise ParsingError(f"Erro ao ler o arquivo Excel: {str(e)}")
     
     def _extract_transactions(self, df) -> List[Transaction]:
         """Extrai transações do DataFrame."""
         transactions = []
-        
-        # Procura pela linha que contém os cabeçalhos das transações
-        header_row_idx = None
-        for idx, row in df.iterrows():
-            if 'Data Mov.' in str(row.iloc[0]) or 'Data Mov' in str(row.iloc[0]):
-                header_row_idx = idx
+
+        # Procura colunas comuns em extratos Excel
+        date_col = None
+        description_col = None
+        amount_col = None
+
+        # Normaliza os nomes das colunas para facilitar a busca
+        normalized_columns = [str(col).strip().lower() for col in df.columns]
+
+        # Define listas de possíveis nomes para cada coluna
+        possible_date_cols = ['data mov.', 'data mov', 'data', 'date', 'data transacao', 'transaction date']
+        possible_description_cols = ['descricao', 'description', 'descrição']
+        possible_amount_cols = ['valor', 'amount', 'value', 'montante']
+
+        # Encontra as colunas correspondentes
+        for col_name in possible_date_cols:
+            if col_name in normalized_columns:
+                date_col = df.columns[normalized_columns.index(col_name)]
                 break
-        
-        if header_row_idx is None:
-            raise ParsingError("Não foi possível encontrar os cabeçalhos das transações")
-        
-        # Processa as linhas de transações após os cabeçalhos
-        for idx in range(header_row_idx + 1, len(df)):
-            row = df.iloc[idx]
-            
-            # Verifica se a linha tem dados suficientes
-            if pd.isna(row.iloc[0]) or str(row.iloc[0]).strip() == '':
-                continue
-                
+
+        for col_name in possible_description_cols:
+            if col_name in normalized_columns:
+                description_col = df.columns[normalized_columns.index(col_name)]
+                break
+
+        for col_name in possible_amount_cols:
+            if col_name in normalized_columns:
+                amount_col = df.columns[normalized_columns.index(col_name)]
+                break
+
+        if not date_col or not description_col or not amount_col:
+            raise ParsingError("Não foi possível identificar as colunas necessárias no Excel")
+
+        for _, row in df.iterrows():
             try:
-                # Extrai data
-                date_str = str(row.iloc[0]).strip()
+                # Extrai e converte a data
+                date_str = str(row[date_col]).strip()
                 date = self._parse_date(date_str)
-                
-                # Extrai valor
-                amount_str = str(row.iloc[3]).strip() if len(row) > 3 else "0"
-                amount = self._parse_amount(amount_str)
-                
-                # Determina o tipo de transação
-                transaction_type = TransactionType.CREDIT if amount >= 0 else TransactionType.DEBIT
-                
-                # Extrai descrição (pode ser a própria data ou outra coluna)
-                description = f"Transação em {date_str}"
-                if len(row) > 2 and not pd.isna(row.iloc[2]):
-                    description = str(row.iloc[2]).strip()
-                
+
+                # Extrai a descrição
+                description = str(row[description_col]).strip()
+
+                # Extrai e converte o valor
+                amount_str = str(row[amount_col]).strip()
+                amount, transaction_type = self._parse_amount(amount_str)
+
                 # Cria a transação
                 transaction = Transaction(
                     date=date,
                     description=description,
-                    amount=abs(amount),
+                    amount=amount,
                     type=transaction_type
                 )
-                
+
                 transactions.append(transaction)
-                
-            except Exception as e:
-                # Log do erro mas continua processando
-                print(f"Erro ao processar linha {idx}: {e}")
+
+            except Exception:
+                # Ignora transações que não podem ser processadas
                 continue
-        
+
         return transactions
     
     def _parse_date(self, date_str: str) -> datetime:

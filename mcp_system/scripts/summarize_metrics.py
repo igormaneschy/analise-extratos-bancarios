@@ -20,6 +20,10 @@ Saída:
 import os, sys, csv, argparse, datetime as dt, statistics as st, json
 from math import floor
 from typing import List, Dict, Any
+import pathlib
+
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
 def p95(vals: List[float]) -> float:
     if not vals:
@@ -54,6 +58,10 @@ def parse_dt(s):
     return None
 
 def load_csv(path: str) -> List[Dict[str, Any]]:
+    # Se nenhum caminho foi especificado, usar o padrão dentro da pasta mcp_system
+    if path == "mcp_system/.mcp_index/metrics.csv":
+        path = str(CURRENT_DIR / ".mcp_index/metrics.csv")
+    
     if not os.path.exists(path):
         print(f"[erro] CSV não encontrado: {path}")
         sys.exit(1)
@@ -211,7 +219,7 @@ def summarize(rows: List[Dict], args):
 
 def main():
     parser = argparse.ArgumentParser(description="Resumo de métricas do MCP")
-    parser.add_argument("--file", default="mcp_system/.mcp_index/metrics.csv", help="Arquivo CSV de métricas")
+    parser.add_argument("--file", default=str(CURRENT_DIR / ".mcp_index/metrics.csv"), help="Arquivo CSV de métricas")
     parser.add_argument("--since", type=int, default=0, help="Filtrar por dias recentes")
     parser.add_argument("--filter", default="", help="Filtrar por termo na query")
     parser.add_argument("--json", action="store_true", help="Saída em JSON")

@@ -27,9 +27,13 @@ import argparse
 import datetime as dt
 from pathlib import Path
 from typing import List, Dict, Any
+import pathlib
 
-# ---- Config métricas (mesmo padrão do context_pack)
-METRICS_PATH = os.environ.get("MCP_METRICS_FILE", ".mcp_index/metrics.csv")
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
+
+# ---- Config métricas (mesmo padrão do context_pack) - agora usando caminho relativo à pasta mcp_system
+METRICS_PATH = os.environ.get("MCP_METRICS_FILE", str(CURRENT_DIR / ".mcp_index/metrics.csv"))
 
 def _log_metrics(row: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(METRICS_PATH), exist_ok=True)
@@ -47,7 +51,7 @@ def _est_tokens_from_len(n_chars: int) -> int:
 def parse_args():
     p = argparse.ArgumentParser(description="Reindexa o projeto para o MCP Code Indexer.")
     p.add_argument("--path", default=".", help="Pasta ou arquivo inicial (default: .)")
-    p.add_argument("--index-dir", default=".mcp_index", help="Diretório de índice (default: .mcp_index)")
+    p.add_argument("--index-dir", default=str(CURRENT_DIR / ".mcp_index"), help="Diretório de índice (default: .mcp_index)")
     p.add_argument("--clean", action="store_true", help="Remove o índice antes de reindexar")
     p.add_argument("--recursive", action="store_true", default=True, help="Busca recursiva (default: True)")
     p.add_argument("--no-recursive", dest="recursive", action="store_false", help="Desabilita busca recursiva")
@@ -65,7 +69,7 @@ def parse_args():
 def main():
     args = parse_args()
     base_dir = Path.cwd()
-    index_dir = base_dir / args.index_dir
+    index_dir = Path(args.index_dir)  # Agora usa o caminho absoluto
 
     # Importa o indexador do seu projeto
     try:

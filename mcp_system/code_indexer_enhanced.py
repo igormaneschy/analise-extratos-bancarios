@@ -4,10 +4,14 @@ from __future__ import annotations
 import os, re, json, math, time, hashlib, threading, csv, datetime as dt
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
+import pathlib
 
 #logs para métricas
 
-METRICS_PATH = os.environ.get("MCP_METRICS_FILE", ".mcp_index/metrics.csv")
+# Diretório atual deste módulo para resoluções relativas ao pacote mcp_system
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
+
+METRICS_PATH = os.environ.get("MCP_METRICS_FILE", str(CURRENT_DIR / ".mcp_index/metrics.csv"))
 
 def _log_metrics(row: dict):
     """Append de uma linha de métricas em CSV."""
@@ -22,8 +26,8 @@ def _log_metrics(row: dict):
 # Tenta importar recursos avançados
 HAS_ENHANCED_FEATURES = True
 try:
-    from src.embeddings.semantic_search import SemanticSearchEngine
-    from src.utils.file_watcher import create_file_watcher
+    from .embeddings.semantic_search import SemanticSearchEngine
+    from .utils.file_watcher import create_file_watcher
 except ImportError:
     HAS_ENHANCED_FEATURES = False
     SemanticSearchEngine = None
@@ -67,7 +71,7 @@ def hash_id(s: str) -> str:
 # ========== INDEXADOR BASE ==========
 
 class BaseCodeIndexer:
-    def __init__(self, index_dir: str = ".mcp_index", repo_root: str = ".") -> None:
+    def __init__(self, index_dir: str = str(CURRENT_DIR / ".mcp_index"), repo_root: str = str(CURRENT_DIR.parent)) -> None:
         self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.repo_root = Path(repo_root)
@@ -108,6 +112,18 @@ class BaseCodeIndexer:
         inv_p.write_text(json.dumps(self.inverted), encoding="utf-8")
         dl_p.write_text(json.dumps(self.doc_len), encoding="utf-8")
         mt_p.write_text(json.dumps(self.file_mtime), encoding="utf-8")
+
+    # ---------- métricas e estatísticas ----------
+    def get_stats(self) -> Dict[str, Any]:
+        try:
+            index_size_bytes = sum(len(json.dumps(c)) for c in self.chunks.values())
+        except Exception:
+            index_size_bytes = 0
+        return {
+            "total_chunks": len(self.chunks),
+            "total_files": len(set(c.get("file_path") for c in self.chunks.values())),
+            "index_size_mb": round(index_size_bytes / (1024 * 1024), 3),
+        }
 
     # ---------- chunking ----------
     def _read_text(self, path: Path) -> Optional[str]:
@@ -150,20 +166,25 @@ class BaseCodeIndexer:
         if text is None:
             return (0,0)
         mtime = file_path.stat().st_mtime
-        self.file_mtime[str(file_path)] = mtime
+        # Salvar path relativo ao repo_root para estabilidade
+        try:
+            rel_path = file_path.resolve().relative_to(self.repo_root.resolve())
+        except Exception:
+            rel_path = file_path.name
+        self.file_mtime[str(rel_path)] = mtime
 
         chunks = self._split_chunks(file_path, text)
         new_chunks = 0
         new_tokens = 0
         for (start, end, content) in chunks:
-            chunk_key = f"{file_path}|{start}|{end}|{mtime}"
+            chunk_key = f"{rel_path}|{start}|{end}|{mtime}"
             cid = hash_id(chunk_key)
             toks = tokenize(content)
             if not toks:
                 continue
             self.chunks[cid] = {
                 "chunk_id": cid,
-                "file_path": str(file_path),
+                "file_path": str(rel_path),
                 "start_line": start,
                 "end_line": end,
                 "content": content,
@@ -203,6 +224,8 @@ def index_repo_paths(
 
     for p in paths:
         pth = Path(p)
+        if not pth.is_absolute():
+            pth = (indexer.repo_root / pth).resolve()
         if pth.is_file():
             if any(pth.match(gl) for gl in include) and not any(pth.match(gl) for gl in exclude):
                 c, _ = indexer._index_file(pth)
@@ -733,9 +756,12 @@ def enhanced_index_repo_paths(
     paths: List[str],
     recursive: bool = True,
     include_globs: List[str] = None,
-    exclude_globs: List[str] = None
+    exclude_globs: List[str] = None,
+    enable_semantic: bool = True  # Adicionado para compatibilidade com o servidor
 ) -> Dict[str,int]:
     """Wrapper para compatibilidade com API antiga"""
+    # O parâmetro enable_semantic não é usado diretamente na indexação,
+    # mas é mantido para compatibilidade com a API do servidor
     return indexer.index_files(
         paths=paths,
         recursive=recursive,
@@ -747,9 +773,13 @@ def enhanced_search_code(
     indexer: EnhancedCodeIndexer, 
     query: str, 
     top_k: int = 30, 
-    filters: Optional[Dict] = None
+    filters: Optional[Dict] = None,
+    semantic_weight: float = None,
+    use_mmr: bool = True
 ) -> List[Dict]:
     """Wrapper para compatibilidade com API antiga"""
+    # Os parâmetros semantic_weight e use_mmr são mantidos para compatibilidade
+    # mas podem não ser usados dependendo da implementação do indexer
     return indexer.search_code(query=query, top_k=top_k, filters=filters)
 
 def enhanced_build_context_pack(

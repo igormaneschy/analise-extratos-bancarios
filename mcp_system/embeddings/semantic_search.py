@@ -12,6 +12,10 @@ import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
+import pathlib
+
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -35,21 +39,18 @@ class SemanticSearchEngine:
     para busca híbrida otimizada
     """
     
-    def __init__(self, cache_dir: str = ".mcp_index", model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, cache_dir: str = str(CURRENT_DIR.parent / ".mcp_index"), model_name: str = "all-MiniLM-L6-v2"):
         self.cache_dir = Path(cache_dir)
         self.embeddings_dir = self.cache_dir / "embeddings"
         self.embeddings_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.model_name = model_name
         self.model = None
         self.embeddings_cache: Dict[str, np.ndarray] = {}
         self.metadata_cache: Dict[str, Dict] = {}
-        
-        if HAS_SENTENCE_TRANSFORMERS:
-            self._initialize_model()
-        else:
-            import sys
-            sys.stderr.write("⚠️  sentence-transformers não encontrado. Busca semântica desabilitada.\n")
+
+        # Lazy-load: não carregar o modelo no __init__
+        # Se sentence-transformers não estiver disponível, os métodos farão fallback silencioso
 
     def _initialize_model(self):
         """Inicializa o modelo de embeddings de forma lazy"""
@@ -78,18 +79,22 @@ class SemanticSearchEngine:
     def get_embedding(self, chunk_id: str, content: str, force_regenerate: bool = False) -> Optional[np.ndarray]:
         """
         Obtém embedding para um chunk, usando cache quando possível
-        
+
         Args:
             chunk_id: Identificador único do chunk
             content: Conteúdo do chunk para gerar embedding
             force_regenerate: Se True, força regeneração do embedding
-            
+
         Returns:
             Array numpy com o embedding ou None se erro
         """
-        if not HAS_SENTENCE_TRANSFORMERS or self.model is None:
+        if not HAS_SENTENCE_TRANSFORMERS:
             return None
-            
+        if self.model is None:
+            self._initialize_model()
+            if self.model is None:
+                return None
+
         cache_path = self._get_embedding_cache_path(chunk_id)
         metadata_path = self._get_metadata_cache_path(chunk_id)
         content_hash = self._hash_content(content)
@@ -140,26 +145,30 @@ class SemanticSearchEngine:
             sys.stderr.write(f"❌ Erro ao gerar embedding para {chunk_id}: {e}\n")
             return None
     
-    def search_similar(self, query: str, chunk_embeddings: Dict[str, np.ndarray], 
+    def search_similar(self, query: str, chunk_embeddings: Dict[str, np.ndarray],
                       top_k: int = 10) -> List[Tuple[str, float]]:
         """
         Busca chunks similares semanticamente à query
-        
+
         Args:
             query: Texto da consulta
             chunk_embeddings: Dict de chunk_id -> embedding
             top_k: Número máximo de resultados
-            
+
         Returns:
             Lista de (chunk_id, similarity_score) ordenada por similaridade
         """
-        if not HAS_SENTENCE_TRANSFORMERS or self.model is None:
+        if not HAS_SENTENCE_TRANSFORMERS:
             return []
-        
+        if self.model is None:
+            self._initialize_model()
+            if self.model is None:
+                return []
+
         try:
             # Gera embedding da query
             query_embedding = self.model.encode([query])[0]
-            
+
             # Calcula similaridade com todos os chunks
             similarities = []
             for chunk_id, chunk_embedding in chunk_embeddings.items():
@@ -168,12 +177,12 @@ class SemanticSearchEngine:
                     np.linalg.norm(query_embedding) * np.linalg.norm(chunk_embedding)
                 )
                 similarities.append((chunk_id, float(similarity)))
-            
+
             # Ordena por similaridade descendente
             similarities.sort(key=lambda x: x[1], reverse=True)
-            
+
             return similarities[:top_k]
-            
+
         except Exception as e:
             import sys
             sys.stderr.write(f"❌ Erro na busca semântica: {e}\n")

@@ -10,6 +10,10 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Dict, List, Any
+import pathlib
+
+# Obter o diretório do script atual
+CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 
 def print_header(title: str):
     """Imprime header formatado"""
@@ -90,7 +94,7 @@ def install_dependencies(missing_deps: List[str]) -> bool:
     
     try:
         # Instala requirements_enhanced.txt se existir
-        req_file = Path("requirements_enhanced.txt")
+        req_file = CURRENT_DIR / "requirements_enhanced.txt"
         if req_file.exists():
             print_step("Instalando via requirements_enhanced.txt")
             result = subprocess.run([
@@ -102,248 +106,113 @@ def install_dependencies(missing_deps: List[str]) -> bool:
                 return True
             else:
                 print_step(f"Erro na instalação: {result.stderr}", "error")
-        
-        # Instalação individual
-        for dep in missing_deps:
-            print_step(f"Instalando {dep}")
-            result = subprocess.run([
-                sys.executable, "-m", "pip", "install", dep
-            ], capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                print_step(f"{dep} instalado", "ok")
-            else:
-                print_step(f"Erro ao instalar {dep}: {result.stderr}", "warn")
+                return False
+        else:
+            # Instala pacotes individualmente
+            packages = []
+            if "sentence_transformers" in missing_deps:
+                packages.append("sentence-transformers>=2.0.0")
+            if "watchdog" in missing_deps:
+                packages.append("watchdog>=3.0.0")
+            if "numpy" in missing_deps:
+                packages.append("numpy>=1.21.0")
+            if "scikit_learn" in missing_deps:
+                packages.append("scikit-learn>=1.0.0")
                 
-        return True
-        
+            if packages:
+                print_step("Instalando pacotes individualmente")
+                result = subprocess.run([
+                    sys.executable, "-m", "pip", "install"] + packages,
+                    capture_output=True, text=True
+                )
+                
+                if result.returncode == 0:
+                    print_step("Dependências instaladas", "ok")
+                    return True
+                else:
+                    print_step(f"Erro na instalação: {result.stderr}", "error")
+                    return False
+            else:
+                print_step("Nenhum pacote para instalar", "ok")
+                return True
+                
     except Exception as e:
-        print_step(f"Erro na instalação: {e}", "error")
+        print_step(f"Erro ao instalar dependências: {e}", "error")
         return False
 
-def setup_mcp_config() -> bool:
-    """Configura arquivo MCP para usar servidor melhorado"""
-    print_header("Configurando MCP")
+def setup_index_directory():
+    """Configura o diretório de índice"""
+    print_header("Configurando Diretório de Índice")
     
     try:
-        vscode_dir = Path(".vscode")
-        vscode_dir.mkdir(exist_ok=True)
-        
-        mcp_config = {
-            "servers": {
-                "code-indexer-enhanced": {
-                    "type": "stdio",
-                    "command": "python",
-                    "args": ["-u", "mcp_server_enhanced.py"],
-                    "cwd": "${workspaceFolder}",
-                    "env": {
-                        "INDEX_DIR": ".mcp_index",
-                        "INDEX_ROOT": "${workspaceFolder}"
-                    }
-                }
-            }
-        }
-        
-        import json
-        mcp_file = vscode_dir / "mcp.json"
-        with open(mcp_file, 'w', encoding='utf-8') as f:
-            json.dump(mcp_config, f, indent=2)
-        
-        print_step(f"Configuração salva em {mcp_file}", "ok")
+        index_dir = CURRENT_DIR / ".mcp_index"
+        index_dir.mkdir(exist_ok=True)
+        print_step(f"Diretório de índice criado: {index_dir}", "ok")
         return True
-        
     except Exception as e:
-        print_step(f"Erro ao configurar MCP: {e}", "error")
+        print_step(f"Erro ao criar diretório de índice: {e}", "error")
         return False
 
-def initial_indexing() -> bool:
-    """Executa indexação inicial do projeto"""
-    print_header("Indexação Inicial do Projeto")
-
-    try:
-        # Importa indexador melhorado
-        from mcp_system import EnhancedCodeIndexer
-
-        print_step("Iniciando indexador melhorado")
-        indexer = EnhancedCodeIndexer(
-            index_dir=".mcp_index",
-            repo_root=".",
-            enable_semantic=True,
-            enable_auto_indexing=False  # Não inicia watcher ainda
-        )
-
-        # Indexa projeto atual
-        print_step("Indexando arquivos do projeto...")
-        result = indexer.index_files(["."])
-
-        files_indexed = result.get('files_indexed', 0)
-        chunks_created = result.get('chunks', 0)
-
-        print_step(f"Indexados {files_indexed} arquivos, {chunks_created} chunks", "ok")
-
-        # Testa busca
-        print_step("Testando busca...")
-        search_results = indexer.search_code("função main", top_k=3)
-        print_step(f"Busca retornou {len(search_results)} resultados", "ok")
-
-        return True
-
-    except ImportError:
-        print_step("Indexador melhorado não disponível, usando versão base integrada", "warn")
-        try:
-            from mcp_system import BaseCodeIndexer, index_repo_paths
-            indexer = BaseCodeIndexer(index_dir=".mcp_index", repo_root=".")
-
-            # Indexação básica usando função integrada
-            print_step("Indexando com versão base...")
-            result = index_repo_paths(indexer, ["."])
-
-            files_indexed = result.get('files_indexed', 0)
-            chunks_created = result.get('chunks', 0)
-
-            print_step(f"Indexados {files_indexed} arquivos, {chunks_created} chunks", "ok")
-            return True
-        except Exception as e:
-            print_step(f"Erro na indexação: {e}", "error")
-            return False
-    except Exception as e:
-        print_step(f"Erro na indexação: {e}", "error")
-        return False
-
-def test_mcp_server() -> bool:
-    """Testa se o servidor MCP está funcionando"""
-    print_header("Testando Servidor MCP")
+def test_basic_functionality():
+    """Testa funcionalidade básica do MCP"""
+    print_header("Testando Funcionalidade Básica")
     
     try:
-        # Testa importação do servidor
-        print_step("Importando servidor MCP...")
-        import mcp_server_enhanced
-        print_step("Servidor importado", "ok")
+        # Testar importação dos módulos principais
+        from code_indexer_enhanced import BaseCodeIndexer
+        print_step("Importação do indexador básico", "ok")
         
-        # Verifica se as tools estão disponíveis
-        server = mcp_server_enhanced.EnhancedCompatServer("test")
-        tools = server.list_tools()
+        # Testar criação do indexador
+        index_dir = CURRENT_DIR / ".mcp_index"
+        indexer = BaseCodeIndexer(index_dir=str(index_dir))
+        print_step("Criação do indexador", "ok")
         
-        print_step(f"Encontradas {len(tools)} tools disponíveis", "ok")
-        for tool in tools:
-            print_step(f"  • {tool.name}: {tool.description}", "")
+        # Testar métodos básicos
+        stats = indexer.get_stats()
+        print_step("Obtenção de estatísticas", "ok")
         
+        print_step("Testes básicos concluídos com sucesso", "ok")
         return True
         
     except Exception as e:
-        print_step(f"Erro no teste do servidor: {e}", "error")
+        print_step(f"Erro nos testes básicos: {e}", "error")
         return False
-
-def show_usage_guide():
-    """Mostra guia de uso do sistema"""
-    print_header("Guia de Uso")
-    
-    print("""
-🎯 SISTEMA MCP CONFIGURADO COM SUCESSO!
-
-📋 COMANDOS PRINCIPAIS:
-
-1️⃣ Via MCP Tools (no Claude/cursor):
-   • index_path: Indexa arquivos/diretórios
-   • search_code: Busca híbrida BM25 + semântica
-   • context_pack: Gera contexto orçamentado
-   • auto_index: Controla auto-indexação
-   • get_stats: Estatísticas do sistema
-   • cache_management: Gerencia caches
-
-2️⃣ Via Python:
-   ```python
-   from mcp_system import EnhancedCodeIndexer
-
-   indexer = EnhancedCodeIndexer()
-   results = indexer.search_code("sua consulta")
-   context = indexer.build_context_pack("sua consulta", budget_tokens=3000)
-   ```
-
-3️⃣ Auto-indexação:
-   ```python
-   indexer.start_auto_indexing()  # Monitora mudanças automaticamente
-   ```
-
-🔧 CONFIGURAÇÕES:
-
-• Índice armazenado em: .mcp_index/
-• Busca semântica: Ativada (se sentence-transformers disponível)
-• Auto-indexação: Disponível (se watchdog disponível)
-• Cache persistente: Sim
-• Orçamento de tokens: Configurável
-
-⚡ PRÓXIMOS PASSOS:
-
-1. Reinicie seu editor (VSCode/Cursor)
-2. Use as MCP tools para indexar e buscar código
-3. Configure auto-indexação com: auto_index {"action": "start"}
-4. Monitore performance com: get_stats
-
-📊 BENEFÍCIOS:
-
-✅ 95% menos tokens irrelevantes
-✅ Busca semântica + lexical híbrida
-✅ Auto-reindexação em mudanças
-✅ Cache inteligente persistente
-✅ Orçamento de contexto controlado
-
-🆘 SUPORTE:
-
-• Verifique logs: get_stats
-• Limpe cache: cache_management {"action": "clear"}
-• Reinicie indexação: Apague .mcp_index/ e reindexe
-""")
 
 def main():
-    """Função principal do setup"""
-    print_header("Setup do Sistema MCP Melhorado")
-    print("Este script configurará busca semântica + auto-indexação")
+    """Função principal de setup"""
+    print_header("Setup Automático do Sistema MCP")
     
-    # 1. Verificar dependências
+    # Verificar dependências
     deps = check_dependencies()
+    missing_deps = [dep for dep, available in deps.items() if not available]
     
-    # 2. Instalar dependências se necessário
-    missing = []
-    if not deps.get('sentence_transformers'):
-        missing.append('sentence-transformers')
-    if not deps.get('watchdog'):
-        missing.append('watchdog')
-    if not deps.get('numpy'):
-        missing.append('numpy')
+    if missing_deps:
+        print(f"\nDependências em falta: {', '.join(missing_deps)}")
+        install = input("\nDeseja instalar as dependências em falta? (s/n): ").lower().strip()
+        if install == 's':
+            if not install_dependencies(missing_deps):
+                print("Falha na instalação de dependências. Saindo.")
+                return 1
+        else:
+            print("Instalação de dependências cancelada.")
+    else:
+        print("\n✅ Todas as dependências estão instaladas!")
     
-    if missing:
-        print(f"\n💡 Dependências opcionais em falta: {', '.join(missing)}")
-        install = input("Deseja instalar agora? (s/N): ").lower().strip()
-        if install in ['s', 'sim', 'y', 'yes']:
-            install_dependencies(missing)
+    # Configurar diretório de índice
+    if not setup_index_directory():
+        print("Falha na configuração do diretório de índice. Saindo.")
+        return 1
     
-    # 3. Configurar MCP
-    if not setup_mcp_config():
-        print("\n❌ Falha na configuração do MCP")
-        return False
+    # Testar funcionalidade básica
+    if not test_basic_functionality():
+        print("Falha nos testes básicos. Saindo.")
+        return 1
     
-    # 4. Indexação inicial
-    print("\n💡 Executando indexação inicial (pode demorar um pouco)...")
-    if not initial_indexing():
-        print("\n⚠️  Falha na indexação inicial, mas sistema pode funcionar")
+    print_header("Setup Concluído com Sucesso!")
+    print("O sistema MCP está pronto para uso.")
+    print(f"O diretório de índice está localizado em: {CURRENT_DIR / '.mcp_index'}")
     
-    # 5. Testar servidor
-    if not test_mcp_server():
-        print("\n⚠️  Problemas detectados no servidor MCP")
-    
-    # 6. Mostrar guia de uso
-    show_usage_guide()
-    
-    print("\n🎉 Setup concluído! Reinicie seu editor para usar o sistema MCP melhorado.")
-    return True
+    return 0
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n⚠️ Setup cancelado pelo usuário")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Erro durante setup: {e}")
-        sys.exit(1)
+    sys.exit(main())
