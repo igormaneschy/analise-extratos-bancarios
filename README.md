@@ -4,7 +4,7 @@ Sistema Python para análise automatizada de extratos bancários com extração 
 
 ## 🎯 Objetivo
 
-Automatizar a análise de extratos bancários em PDF e Excel, extraindo informações relevantes como:
+Automatizar a análise de extratos bancários em PDF, Excel e CSV, extraindo informações relevantes como:
 - **Transações**: Data, valor, descrição, tipo
 - **Saldos**: Inicial, final, médio do período
 - **Categorização**: Classificação automática por tipo de gasto
@@ -12,9 +12,10 @@ Automatizar a análise de extratos bancários em PDF e Excel, extraindo informa�
 
 ## ✨ Funcionalidades
 
-### 📄 **Processamento de PDFs e Excel**
+### 📄 **Processamento de PDFs, Excel e CSV**
 - Extração de texto de extratos bancários em PDF
 - Leitura de extratos em formato Excel (XLSX)
+- Leitura de extratos em formato CSV
 - Suporte a múltiplos formatos de bancos europeus
 - Detecção automática de layout
 
@@ -26,187 +27,163 @@ Automatizar a análise de extratos bancários em PDF e Excel, extraindo informa�
 ### 📊 **Análise Financeira**
 - Resumo de receitas e despesas
 - Análise de fluxo de caixa
-- Identificação de gastos recorrentes
-- Relatórios por categoria
+- Identificação de tendências de gastos
+- Alertas financeiros personalizados
 
-### 📈 **Relatórios**
-- Exportação em múltiplos formatos (texto, Markdown)
-- Gráficos e visualizações
-- Comparativos mensais
+### 📈 **Visualização e Relatórios**
+- Relatórios em formato texto
+- Relatórios em formato Markdown
+- Visualizações no terminal com Rich
+- Exportação de dados
 
-## 🚀 Instalação
+## 🚀 Começando
 
-### Pré-requisitos
-- Python 3.8+
-- pip
+### 📋 Pré-requisitos
 
-### Instalação das Dependências
+- Python 3.8 ou superior
+- pip (gerenciador de pacotes do Python)
+
+### 🔧 Instalação
+
+1. Clone o repositório:
+```bash
+git clone <url-do-repositorio>
+cd sistema-analise-extratos
+```
+
+2. Instale as dependências:
 ```bash
 pip install -r requirements.txt
 ```
 
-### Dependências Principais
-- **PyPDF2**: Extração de texto de PDFs
-- **openpyxl**: Leitura de arquivos Excel
-- **pandas**: Manipulação de dados
-- **matplotlib**: Geração de gráficos
-- **reportlab**: Criação de relatórios PDF
+### 📖 Uso
 
-## 📖 Uso
+#### Análise de Extratos
 
-### Análise de Extrato
 ```bash
-# Analisar um extrato em PDF
-python main.py analyze data/samples/extrato.pdf
+# Analisar um extrato PDF
+python main.py analyze extrato.pdf
 
-# Analisar um extrato em Excel
-python main.py analyze data/samples/extrato.xlsx
+# Analisar um extrato Excel
+python main.py analyze extrato.xlsx
+
+# Analisar um extrato CSV
+python main.py analyze extrato.csv
 
 # Salvar relatório em arquivo
-python main.py analyze data/samples/extrato.pdf --output relatorio.txt
+python main.py analyze extrato.pdf --output relatorio.txt
 
 # Gerar relatório em Markdown
-python main.py analyze data/samples/extrato.pdf --output relatorio.md --format markdown
+python main.py analyze extrato.xlsx --format markdown --output relatorio.md
 ```
 
-### Informações do Sistema
+#### Criar Instruções de Uso
+
 ```bash
-# Ver informações sobre o sistema
-python main.py info
-
-# Criar arquivo de instruções de teste
-python main.py sample
+# Gera um arquivo com instruções de uso
+python main.py sample instrucoes.txt
 ```
 
-## 🏦 Bancos Suportados
+## 📁 Estrutura de Arquivos CSV
 
-O sistema suporta extratos de diversos bancos europeus, incluindo:
+Para que o sistema possa processar corretamente um arquivo CSV, ele deve conter as seguintes colunas:
 
-**Portugal:**
-- Banco BPI
-- Caixa Geral de Depósitos
-- Banco Comercial Português
-- Millennium BCP
-- Novo Banco
-- Banco Santander Totta
+### Colunas Obrigatórias:
+- **Data da transação** (formatos aceitos: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD)
+- **Descrição da transação**
+- **Valor da transação** (positivo para receitas, negativo para despesas)
 
-**Espanha:**
-- Santander
-- BBVA
-- CaixaBank
-- Banco Sabadell
+### Colunas Opcionais:
+- **Saldo após a transação**
+- **Número da conta**
+- **Saldo inicial/final**
 
-**França:**
-- BNP Paribas
-- Crédit Agricole
-- ING Bank
+### Exemplo de Estrutura:
 
-**Alemanha:**
-- Deutsche Bank
-- Commerzbank
-- Sparkasse
-- Volksbank
-
-**Itália:**
-- UniCredit
-- Intesa Sanpaolo
-
-**Países Baixos:**
-- ING Bank
-- ABN AMRO
-- Rabobank
-
-**Bélgica:**
-- KBC Bank
-- Belfius
-- BNP Paribas Fortis
-
-**Áustria:**
-- Erste Bank
-- Raiffeisen
-
-**Suíça:**
-- UBS
-- Credit Suisse
-
-**Reino Unido:**
-- HSBC
-- Barclays
-- Lloyds
-- NatWest
-
-**Bancos Digitais:**
-- Revolut
-- Wise (TransferWise)
-- N26
-- Monzo
-- Starling Bank
-
-## 🛠️ Desenvolvimento
-
-### Estrutura do Projeto
-```
-src/
-├── domain/          # Modelos e interfaces do domínio
-├── application/     # Casos de uso e lógica de aplicação
-├── infrastructure/  # Implementações concretas
-│   ├── readers/     # Leitores de diferentes formatos
-│   ├── categorizers/ # Categorizadores de transações
-│   ├── analyzers/   # Analisadores de extratos
-│   └── reports/     # Geradores de relatórios
-└── presentation/    # Interface com o usuário (CLI)
+```csv
+data,descricao,valor,saldo
+01/01/2023,Salário Janeiro,2500.00,2500.00
+02/01/2023,Supermercado,-150.50,2349.50
+03/01/2023,Conta de Luz,-80.00,2269.50
 ```
 
-### Nota sobre Histórico de Desenvolvimento
-- O registro de histórico (dev_history.md) é gerenciado exclusivamente pelas rules do CodeLLM em `.codellm/rules/01-historico_desenvolvimento.mdc`.
-- O servidor MCP e os componentes em `mcp_system/` não escrevem nem leem o dev_history.md.
-- A pasta `mcp_system/` é intencionalmente excluída do histórico pela regra.
+## 💰 Moedas Suportadas
 
-### Adicionando Suporte a Novos Bancos
-
-1. Atualize o arquivo `src/infrastructure/readers/pdf_reader_config.json` com padrões específicos do banco
-2. Adicione padrões de nome do banco na lista `bank_name_patterns`
-3. Teste com extratos reais do banco
-
-### Criando Novos Leitores
-
-Implemente a interface `StatementReader` no módulo `src.domain.interfaces`:
-
-```python
-class StatementReader(ABC):
-    @abstractmethod
-    def can_read(self, file_path: Path) -> bool:
-        """Verifica se pode ler o arquivo."""
-        pass
-    
-    @abstractmethod
-    def read(self, file_path: Path) -> BankStatement:
-        """Lê o arquivo e retorna um extrato."""
-        pass
-```
-
-## 📋 Próximos Passos (Roadmap)
-
-- [x] Suporte a múltiplos formatos de arquivo (PDF, Excel)
-- [x] Expansão para bancos europeus
-- [ ] Suporte a mais formatos (CSV, OFX)
-- [ ] Integração com IA para categorização aprimorada
-- [ ] Detecção automática de padrões de bancos
-- [ ] Persistência das análises para histórico e modelo de aprendizagem
-- [ ] Interface web com Flask/Django
-- [ ] API REST para integração
-- [ ] Internacionalização (português, inglês, espanhol)
+O sistema detecta automaticamente a moeda do extrato:
+- EUR (Euro) - Padrão
+- USD (Dólar Americano)
+- BRL (Real Brasileiro)
+- GBP (Libra Esterlina)
+- JPY (Iene Japonês)
+- CHF (Franco Suíço)
+- CAD (Dólar Canadense)
+- AUD (Dólar Australiano)
 
 ## 🧪 Testes
 
+Execute os testes para verificar a integridade do sistema:
+
 ```bash
-# Executar testes
-pytest
+# Executar todos os testes
+python -m pytest tests/
 
 # Executar testes com cobertura
-pytest --cov=src
+python -m pytest --cov=src tests/
 ```
+
+## 🛠️ Tecnologias Utilizadas
+
+- **Python 3.8+**
+- **pdfplumber** - Extração de texto de PDFs
+- **pandas** - Processamento de dados Excel e CSV
+- **rich** - Interface de terminal avançada
+- **click** - Interface de linha de comando
+- **reportlab** - Geração de relatórios PDF (futuro)
+- **matplotlib** - Visualizações gráficas (futuro)
+
+## 📦 Estrutura do Projeto
+
+```
+sistema-analise-extratos/
+├── src/
+│   ├── domain/          # Modelos e interfaces de domínio
+│   ├── application/     # Casos de uso
+│   ├── infrastructure/  # Implementações concretas
+│   └── presentation/    # Interface com o usuário
+├── tests/               # Testes automatizados
+├── data/                # Dados de exemplo
+├── main.py              # Ponto de entrada CLI
+└── requirements.txt     # Dependências
+```
+
+## 📈 Roadmap
+
+- [x] Processamento de PDFs
+- [x] Processamento de Excel
+- [x] Processamento de CSV
+- [x] Categorização automática
+- [x] Geração de relatórios
+- [ ] Interface web
+- [ ] API REST
+- [ ] Machine Learning para categorização
+- [ ] Suporte a mais bancos
+- [ ] Visualizações gráficas
+- [ ] Exportação para diferentes formatos
+
+## 🤝 Contribuindo
+
+1. Faça um fork do projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
 
 ## 📄 Licença
 
-MIT License - veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
+
+## 📧 Contato
+
+Seu Nome - [@seu_perfil](https://twitter.com/seu_perfil) - email@example.com
+
+Link do Projeto: [https://github.com/seu_usuario/sistema-analise-extratos](https://github.com/seu_usuario/sistema-analise-extratos)

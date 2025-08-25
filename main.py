@@ -31,7 +31,7 @@ def cli():
 @click.option('--output', '-o', help='Caminho para salvar o relatório')
 @click.option('--format', '-f', type=click.Choice(['text', 'markdown']), default='text', help='Formato do relatório')
 def analyze(file_path, output, format):
-    """Analisa um extrato bancário em PDF ou Excel."""
+    """Analisa um extrato bancário em PDF, Excel ou CSV."""
     try:
         analyzer = ExtractAnalyzer()
 
@@ -49,121 +49,144 @@ def analyze(file_path, output, format):
         console.print(Panel.fit(
             f"[bold green]✓ Análise concluída![/bold green]\n\n"
             f"📊 Total de transações: {result.metadata.get('transaction_count', 0)}\n"
-            f"💰 Receitas: {CurrencyUtils.format_currency(result.total_income, result.currency)}\n"
-            f"💸 Despesas: {CurrencyUtils.format_currency(result.total_expenses, result.currency)}\n"
-            f"📈 Saldo: {CurrencyUtils.format_currency(result.net_flow, result.currency)}",
-            title="Resumo da Análise"
+            f"💰 Receitas: {currency_symbol}{result.total_income:,.2f}\n"
+            f"💸 Despesas: {currency_symbol}{result.total_expenses:,.2f}\n"
+            f"📈 Saldo: {currency_symbol}{result.net_flow:,.2f}"
         ))
-
-        # Mostra alertas se houver
+        
+        # Mostra alertas, se houver
         if result.alerts:
-            console.print("\n[bold yellow]⚠️  Alertas:[/bold yellow]")
+            alert_table = Table(title="⚠️  Alertas", style="yellow")
+            alert_table.add_column("Alerta", style="yellow")
             for alert in result.alerts:
-                console.print(f"  • {alert}")
-
-        # Mostra insights
+                alert_table.add_row(alert)
+            console.print(alert_table)
+        
+        # Mostra insights, se houver
         if result.insights:
-            console.print("\n[bold cyan]💡 Insights:[/bold cyan]")
+            insight_table = Table(title="💡 Insights")
+            insight_table.add_column("Insight", style="cyan")
             for insight in result.insights:
-                console.print(f"  • {insight}")
-
-        # Salva ou mostra relatório completo
+                insight_table.add_row(insight)
+            console.print(insight_table)
+        
+        # Salva ou mostra o relatório completo
         if output:
-            console.print(f"\n[green]✓ Relatório salvo em: {output}[/green]")
+            console.print(f"[green]Relatório salvo em:[/green] {output}")
         else:
-            console.print("\n[dim]Use --output para salvar o relatório completo[/dim]")
-            if click.confirm("\nDeseja ver o relatório completo?"):
-                console.print("\n" + report)
-
-    except FileNotFoundError:
-        console.print(f"[bold red]❌ Erro: Arquivo '{file_path}' não encontrado![/bold red]")
-        sys.exit(1)
+            console.print("\n[bold]Relatório completo:[/bold]\n")
+            console.print(report)
+            
     except DomainException as e:
-        console.print(f"[bold red]❌ Erro: {str(e)}[/bold red]")
+        console.print(f"[red]Erro de domínio:[/red] {str(e)}")
         sys.exit(1)
     except Exception as e:
-        console.print(f"[bold red]❌ Erro inesperado: {str(e)}[/bold red]")
-        console.print("[dim]Use --debug para mais informações[/dim]")
+        console.print(f"[red]Erro inesperado:[/red] {str(e)}")
         sys.exit(1)
 
 
 @cli.command()
-def sample():
-    """Cria um arquivo de exemplo para teste."""
-    sample_dir = Path("data/samples")
-    sample_dir.mkdir(parents=True, exist_ok=True)
-    
-    sample_file = sample_dir / "exemplo_instrucoes.txt"
-    
-    content = """
-INSTRUÇÕES PARA TESTE DO SISTEMA
-================================
+@click.argument('output_path', type=click.Path())
+def sample(output_path):
+    """Cria um arquivo de instruções de exemplo."""
+    instructions = """# Instruções para uso do Sistema de Análise de Extratos Bancários
 
-Para testar o sistema de análise de extratos, você precisa:
+## Formatos Suportados
 
-1. Obter um extrato bancário em PDF ou Excel
-   - Pode ser do seu banco (Santander, BBVA, CaixaBank, BPI, etc.)
-   - Certifique-se de que é um PDF com texto (não escaneado) ou Excel válido
+O sistema suporta os seguintes formatos de extrato:
+1. PDF - Extratos em formato PDF
+2. Excel - Extratos em formato XLSX ou XLS
+3. CSV - Extratos em formato CSV
 
-2. Colocar o arquivo na pasta 'data/samples/'
-   - Exemplo: data/samples/extrato_janeiro.pdf
-   - Exemplo: data/samples/extrato_janeiro.xlsx
+## Estrutura Esperada para CSV
 
-3. Executar a análise:
-   python main.py analyze data/samples/extrato_janeiro.pdf
+Para que o sistema possa processar corretamente um arquivo CSV, ele deve conter as seguintes colunas:
 
-4. Para salvar o relatório:
-   python main.py analyze data/samples/extrato_janeiro.pdf --output relatorio.txt
-
-5. Para gerar relatório em Markdown:
-   python main.py analyze data/samples/extrato_janeiro.pdf --output relatorio.md --format markdown
-
-FORMATO ESPERADO DO PDF
------------------------
-O sistema espera encontrar no PDF:
-- Data das transações (formato DD/MM/AAAA ou DD/MM)
+### Colunas Obrigatórias:
+- Data da transação (formatos aceitos: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD)
 - Descrição da transação
-- Valor (com símbolo de moeda apropriado: €, R$, $, etc.)
-- Saldo (opcional)
+- Valor da transação (positivo para receitas, negativo para despesas)
 
-FORMATO ESPERADO DO EXCEL
--------------------------
-O sistema espera encontrar no Excel:
-- Coluna com datas das transações
-- Coluna com descrições
-- Coluna com valores (positivos para crédito, negativos para débito)
-- Cabeçalhos identificáveis (ex: "Data Mov.", "Descrição", "Valor")
+### Colunas Opcionais:
+- Saldo após a transação
+- Número da conta
+- Saldo inicial/final
 
-LIMITAÇÕES ATUAIS
------------------
-- Suporta apenas PDFs com texto extraível
-- Não processa imagens ou PDFs escaneados
-- Categorização básica por palavras-chave
-- Pode precisar ajustes para formatos específicos de bancos
+### Nomes de Colunas Aceitos:
 
-PRÓXIMAS MELHORIAS
-------------------
-- Integração com IA para melhor categorização
-- Suporte para mais formatos de arquivo
-- Detecção automática de padrões de bancos
-- Interface web
-- Análise de tendências temporais
+#### Para Data:
+- data
+- date
+- data transacao
+- transaction date
 
-MOEDAS SUPORTADAS
------------------
-O sistema detecta automaticamente as seguintes moedas:
-- EUR (€) - Euro
-- BRL (R$) - Real Brasileiro
-- USD ($) - Dólar Americano
-- GBP (£) - Libra Esterlina
-- JPY (¥) - Iene Japonês
-- CHF - Franco Suíço
-- CAD (C$) - Dólar Canadense
-- AUD (A$) - Dólar Australiano
+#### Para Descrição:
+- descricao
+- description
+- descrição
+
+#### Para Valor:
+- valor
+- amount
+- value
+- montante
+
+#### Para Saldo:
+- saldo
+- balance
+- saldo após
+- balance after
+
+## Exemplo de Estrutura CSV:
+
+data,descricao,valor,saldo
+01/01/2023,Salário Janeiro,2500.00,2500.00
+02/01/2023,Supermercado,-150.50,2349.50
+03/01/2023,Conta de Luz,-80.00,2269.50
+05/01/2023,Restaurante,-65.75,2203.75
+
+## Moedas Suportadas:
+
+O sistema detecta automaticamente a moeda do extrato:
+- EUR (Euro) - Padrão
+- USD (Dólar Americano)
+- BRL (Real Brasileiro)
+- GBP (Libra Esterlina)
+- JPY (Iene Japonês)
+- CHF (Franco Suíço)
+- CAD (Dólar Canadense)
+- AUD (Dólar Australiano)
+
+## Executando a Análise:
+
+Para analisar um extrato, use o comando:
+
+```bash
+python main.py analyze caminho/para/seu/extrato.pdf
+python main.py analyze caminho/para/seu/extrato.xlsx
+python main.py analyze caminho/para/seu/extrato.csv
+```
+
+Para salvar o relatório em um arquivo:
+
+```bash
+python main.py analyze caminho/para/seu/extrato.csv --output relatorio.txt
+```
+
+Para gerar um relatório em formato Markdown:
+
+```bash
+python main.py analyze caminho/para/seu/extrato.csv --format markdown --output relatorio.md
+```
 """
     
-    sample_file.write_text(content.strip(), encoding='utf-8')
-    console.print(f"[green]✓ Arquivo de exemplo criado em: {sample_file}[/green]")
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(instructions)
+        console.print(f"[green]✓[/green] Arquivo de instruções criado em: {output_path}")
+    except Exception as e:
+        console.print(f"[red]✗[/red] Erro ao criar arquivo de instruções: {str(e)}")
+        sys.exit(1)
 
 
 @cli.command()
@@ -171,7 +194,7 @@ def version():
     """Mostra a versão do sistema."""
     console.print("[bold blue]Sistema de Análise de Extratos Bancários[/bold blue]")
     console.print("Versão: 1.0.0")
-    console.print("Desenvolvido para análise automatizada de extratos bancários")
+    console.print("Formatos suportados: PDF, Excel, CSV")
 
 
 if __name__ == '__main__':

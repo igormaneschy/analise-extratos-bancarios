@@ -1,0 +1,10 @@
+data,descricao,valor,saldo
+01/01/2023,Salário Janeiro,2500.00,2500.00
+02/01/2023,Supermercado,-150.50,2349.50
+03/01/2023,Conta de Luz,-80.00,2269.50
+05/01/2023,Restaurante,-65.75,2203.75
+10/01/2023,Combustível,-120.30,2083.45
+15/01/2023,Salário Extra,500.00,2583.45
+20/01/2023,Compras Online,-230.45,2353.00
+25/01/2023,Investimento,-300.00,2053.00
+31/01/2023,Taxas Bancárias,-15.00,2038.00

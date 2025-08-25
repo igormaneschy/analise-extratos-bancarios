@@ -64,6 +64,7 @@ class ExtractAnalyzer:
         # Importa implementações concretas
         from src.infrastructure.readers.pdf_reader import PDFStatementReader
         from src.infrastructure.readers.excel_reader import ExcelStatementReader
+        from src.infrastructure.readers.csv_reader import CSVStatementReader
         from src.infrastructure.categorizers.keyword_categorizer import KeywordCategorizer
         from src.infrastructure.analyzers.basic_analyzer import BasicStatementAnalyzer
         from src.infrastructure.reports.text_report import TextReportGenerator
@@ -71,6 +72,7 @@ class ExtractAnalyzer:
         # Inicializa componentes
         self.pdf_reader = PDFStatementReader()
         self.excel_reader = ExcelStatementReader()
+        self.csv_reader = CSVStatementReader()
         self.categorizer = KeywordCategorizer()
         self.analyzer = BasicStatementAnalyzer()
         self.text_report = TextReportGenerator()
@@ -78,7 +80,8 @@ class ExtractAnalyzer:
         # Lista de leitores disponíveis
         self.readers: List[StatementReader] = [
             self.pdf_reader,
-            self.excel_reader
+            self.excel_reader,
+            self.csv_reader
         ]
 
         # Cria caso de uso com o primeiro leitor (será substituído dinamicamente)

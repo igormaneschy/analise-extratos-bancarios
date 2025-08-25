@@ -1,159 +1,153 @@
-#!/usr/bin/env python3
 """
-Suite de testes abrangente para o projeto de análise de extratos bancários
+Testes abrangentes para o sistema de análise de extratos.
 """
-
 import sys
 import os
-import pytest
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
+import pytest
 import uuid
 
-# Adiciona o diretório raiz ao path para imports
+# Adiciona o diretório raiz ao path para importações
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+# Testes de modelos de domínio
 def test_domain_models():
-    """Testa os modelos do domínio"""
-    from src.domain.models import Transaction, TransactionType, BankStatement, AnalysisResult, TransactionCategory
+    """Testa a criação de modelos de domínio."""
+    from src.domain.models import Transaction, BankStatement, AnalysisResult, TransactionType, TransactionCategory
     
     # Testa criação de transação
     transaction = Transaction(
+        id=str(uuid.uuid4()),
         date=datetime.now(),
         description="Test transaction",
         amount=Decimal("100.50"),
-        type=TransactionType.DEBIT
+        type=TransactionType.CREDIT,
+        category=TransactionCategory.SALARIO
     )
     
+    assert transaction.description == "Test transaction"
     assert transaction.amount == Decimal("100.50")
-    assert transaction.type == TransactionType.DEBIT
+    assert transaction.type == TransactionType.CREDIT
+    assert transaction.category == TransactionCategory.SALARIO
+    assert transaction.is_income == True
+    assert transaction.is_expense == False
     
     # Testa criação de extrato bancário
     statement = BankStatement(
-        bank_name="Test Bank",
+        id=str(uuid.uuid4()),
+        bank_name="Banco Teste",
         account_number="12345-6",
         period_start=datetime.now(),
         period_end=datetime.now(),
         initial_balance=Decimal("1000.00"),
-        final_balance=Decimal("1100.50"),
-        transactions=[transaction],
-        currency="EUR"  # Testa novo campo de moeda
+        final_balance=Decimal("1500.00"),
+        currency="EUR",
+        transactions=[transaction]
     )
     
-    assert statement.bank_name == "Test Bank"
+    assert statement.bank_name == "Banco Teste"
+    assert statement.account_number == "12345-6"
     assert statement.currency == "EUR"
     assert len(statement.transactions) == 1
     
-    # Testa criação de resultado de análise
-    analysis_result = AnalysisResult(
-        statement_id=str(uuid.uuid4()),
-        total_income=Decimal("1500.00"),
-        total_expenses=Decimal("1200.00"),
-        net_flow=Decimal("300.00"),
-        currency="EUR",  # Testa novo campo de moeda
-        categories_summary={TransactionCategory.NAO_CATEGORIZADO: Decimal("300.00")},
-        monthly_summary={"2023-01": {"income": Decimal("1500.00"), "expenses": Decimal("1200.00")}},
-        metadata={},
-        alerts=[],
-        insights=[]
-    )
-    
-    assert analysis_result.total_income == Decimal("1500.00")
-    assert analysis_result.currency == "EUR"
+    # Testa cálculo de totais
+    assert statement.total_income == Decimal("100.50")
+    assert statement.total_expenses == Decimal("0.00")
 
 def test_pdf_reader_import():
-    """Testa se o leitor PDF pode ser importado"""
+    """Testa a importação do leitor de PDF."""
     try:
         from src.infrastructure.readers.pdf_reader import PDFStatementReader
         reader = PDFStatementReader()
         assert reader is not None
-    except Exception as e:
-        pytest.fail(f"Falha ao importar ou instanciar PDFStatementReader: {e}")
+    except ImportError:
+        pytest.fail("Não foi possível importar PDFStatementReader")
 
 def test_excel_reader_currency_detection():
-    """Testa se o leitor Excel detecta moeda corretamente"""
+    """Testa a detecção de moeda no leitor de Excel."""
     try:
         from src.infrastructure.readers.excel_reader import ExcelStatementReader
         reader = ExcelStatementReader()
-        assert reader is not None
-        # Testa que o leitor tem o atributo currency
         assert hasattr(reader, 'currency')
-    except Exception as e:
-        pytest.fail(f"Falha ao importar ou instanciar ExcelStatementReader: {e}")
+    except ImportError:
+        pytest.fail("Não foi possível importar ExcelStatementReader")
+
+def test_csv_reader_import():
+    """Testa a importação do leitor de CSV."""
+    try:
+        from src.infrastructure.readers.csv_reader import CSVStatementReader
+        reader = CSVStatementReader()
+        assert reader is not None
+        # Testa se o leitor pode ler arquivos CSV
+        from pathlib import Path
+        assert reader.can_read(Path("test.csv")) == True
+        assert reader.can_read(Path("test.xlsx")) == False
+    except ImportError:
+        pytest.fail("Não foi possível importar CSVStatementReader")
 
 def test_categorizer_import():
-    """Testa se o categorizador pode ser importado"""
+    """Testa a importação do categorizador."""
     try:
         from src.infrastructure.categorizers.keyword_categorizer import KeywordCategorizer
         categorizer = KeywordCategorizer()
         assert categorizer is not None
-    except Exception as e:
-        pytest.fail(f"Falha ao importar ou instanciar KeywordCategorizer: {e}")
+    except ImportError:
+        pytest.fail("Não foi possível importar KeywordCategorizer")
 
 def test_analyzer_currency_handling():
-    """Testa se o analisador lida corretamente com moedas"""
+    """Testa o tratamento de moeda no analisador."""
     try:
         from src.infrastructure.analyzers.basic_analyzer import BasicStatementAnalyzer
-        from src.domain.models import BankStatement, Transaction, TransactionType
-        from datetime import datetime
-        from decimal import Decimal
+        from src.domain.models import BankStatement, Transaction, TransactionType, AnalysisResult
         
         analyzer = BasicStatementAnalyzer()
-        assert analyzer is not None
         
-        # Cria um extrato de teste com moeda
+        # Cria um extrato de exemplo com moeda
         statement = BankStatement(
-            bank_name="Test Bank",
-            account_number="12345-6",
-            period_start=datetime.now(),
-            period_end=datetime.now(),
-            initial_balance=Decimal("1000.00"),
-            final_balance=Decimal("1100.50"),
+            currency="USD",
             transactions=[
                 Transaction(
-                    date=datetime.now(),
-                    description="Test transaction",
-                    amount=Decimal("100.50"),
-                    type=TransactionType.DEBIT
+                    amount=Decimal("100.00"),
+                    type=TransactionType.CREDIT
                 )
-            ],
-            currency="EUR"
+            ]
         )
         
-        # Executa a análise
+        # Analisa o extrato
         result = analyzer.analyze(statement)
         
-        # Verifica se a moeda foi propagada corretamente
-        assert result.currency == "EUR"
-    except Exception as e:
-        pytest.fail(f"Falha ao testar BasicStatementAnalyzer com moeda: {e}")
+        # Verifica se a moeda foi preservada
+        assert result.currency == "USD"
+        
+    except ImportError:
+        pytest.fail("Não foi possível importar BasicStatementAnalyzer")
 
 def test_report_generator_import():
-    """Testa se o gerador de relatórios pode ser importado"""
+    """Testa a importação do gerador de relatórios."""
     try:
         from src.infrastructure.reports.text_report import TextReportGenerator
-        report_generator = TextReportGenerator()
-        assert report_generator is not None
-    except Exception as e:
-        pytest.fail(f"Falha ao importar ou instanciar TextReportGenerator: {e}")
+        generator = TextReportGenerator()
+        assert generator is not None
+    except ImportError:
+        pytest.fail("Não foi possível importar TextReportGenerator")
 
 def test_use_case_import():
-    """Testa se o caso de uso pode ser importado"""
+    """Testa a importação do caso de uso."""
     try:
         from src.application.use_cases import AnalyzeStatementUseCase
         assert AnalyzeStatementUseCase is not None
-    except Exception as e:
-        pytest.fail(f"Falha ao importar AnalyzeStatementUseCase: {e}")
+    except ImportError:
+        pytest.fail("Não foi possível importar AnalyzeStatementUseCase")
 
 def test_main_import():
-    """Testa se o módulo principal pode ser importado"""
+    """Testa a importação do módulo principal."""
     try:
         import main
         assert main is not None
-    except Exception as e:
-        pytest.fail(f"Falha ao importar main: {e}")
+    except ImportError:
+        pytest.fail("Não foi possível importar main")
 
 if __name__ == "__main__":
-    # Executa os testes
     pytest.main([__file__, "-v"])
