@@ -145,21 +145,38 @@ class ExcelStatementReader(StatementReader):
         
         raise ValueError(f"Não foi possível parsear a data: {date_str}")
     
-    def _parse_amount(self, amount_str: str) -> Decimal:
-        """Faz parsing de uma string de valor."""
-        # Remove espaços e caracteres especiais
-        amount_str = amount_str.strip().replace(" ", "")
-        
-        # Substitui vírgula por ponto para decimais
-        amount_str = amount_str.replace(",", ".")
-        
-        # Remove caracteres não numéricos exceto ponto, sinal de menos e dígitos
-        amount_str = re.sub(r'[^\d.-]', '', amount_str)
-        
-        if amount_str == '':
-            return Decimal('0.00')
-            
-        return Decimal(amount_str)
+    def _parse_amount(self, amount_str: str) -> tuple[Decimal, TransactionType]:
+        """Faz parsing de uma string de valor, retornando (valor absoluto, tipo de transação)."""
+        # Remove espaços
+        cleaned = amount_str.strip().replace(" ", "")
+
+        # Verifica negativo (parênteses ou prefixo '-')
+        is_negative = False
+        if cleaned.startswith('-') or (cleaned.startswith('(') and cleaned.endswith(')')):
+            is_negative = True
+            cleaned = cleaned.replace('-', '').replace('(', '').replace(')', '')
+
+        # Remove caracteres não numéricos, exceto separadores
+        cleaned = re.sub(r'[^\d,.-]', '', cleaned)
+
+        # Normaliza separadores decimais
+        if ',' in cleaned and '.' in cleaned:
+            # Formato 1.234,56 -> 1234.56
+            cleaned = cleaned.replace('.', '').replace(',', '.')
+        elif ',' in cleaned:
+            cleaned = cleaned.replace(',', '.')
+
+        if cleaned == '':
+            amount = Decimal('0.00')
+        else:
+            amount = Decimal(cleaned)
+
+        if is_negative:
+            amount = -amount
+
+        transaction_type = TransactionType.CREDIT if amount >= 0 else TransactionType.DEBIT
+        amount = abs(amount)
+        return amount, transaction_type
     
     def _extract_bank_name(self, df) -> str:
         """Extrai o nome do banco do DataFrame."""
@@ -240,11 +257,12 @@ class ExcelStatementReader(StatementReader):
                             match = re.search(r'[\d.,]+', search_value.replace(" ", ""))
                             if match:
                                 try:
-                                    return self._parse_amount(match.group())
+                                    amount, _ = self._parse_amount(match.group())
+                                    return amount
                                 except:
                                     continue
         return Decimal('0.00')
-    
+
     def _extract_final_balance(self, df) -> Decimal:
         """Extrai o saldo final do DataFrame."""
         # Procura por padrões de saldo final nas últimas linhas
@@ -259,7 +277,8 @@ class ExcelStatementReader(StatementReader):
                     match = re.search(r'[\d.,]+', cell_value.replace(" ", ""))
                     if match:
                         try:
-                            return self._parse_amount(match.group())
+                            amount, _ = self._parse_amount(match.group())
+                            return amount
                         except:
                             continue
         return Decimal('0.00')

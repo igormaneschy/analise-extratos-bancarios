@@ -391,8 +391,8 @@ def _summarize_chunk(c: Dict, query_tokens: List[str], max_lines: int = 18) -> s
 def build_context_pack(
     indexer: BaseCodeIndexer,
     query: str,
-    budget_tokens: int = 3000,
-    max_chunks: int = 10,
+    budget_tokens: int = 2000,  # Reduzido de 3000 para 2000
+    max_chunks: int = 5,        # Reduzido de 10 para 5
     strategy: str = "mmr"
 ) -> Dict:
     """
@@ -431,24 +431,37 @@ def build_context_pack(
     pack = {"query": query, "total_tokens": 0, "chunks": []}
     remaining = max(1, budget_tokens)
 
+    # Limite máximo por chunk para evitar consumo excessivo
+    MAX_TOKENS_PER_CHUNK = min(400, budget_tokens // max(1, max_chunks))
+
     for cid in ordered_ids:
         c = indexer.chunks[cid]
         header = f"{c['file_path']}:{c['start_line']}-{c['end_line']}"
-        summary = _summarize_chunk(c, q_tokens, max_lines=18)
+        summary = _summarize_chunk(c, q_tokens, max_lines=12)  # Reduzido de 18 para 12
 
         # snippet inicial = summary (já inclui header + linhas relevantes)
         snippet = summary
         est = est_tokens(snippet)
 
+        # Aplicar limite máximo por chunk
+        if est > MAX_TOKENS_PER_CHUNK:
+            # Poda mais agressiva - corta para caber no limite
+            target_chars = MAX_TOKENS_PER_CHUNK * 3  # ~3 chars por token
+            if len(snippet) > target_chars:
+                snippet = snippet[:target_chars] + "..."
+                est = est_tokens(snippet)
+
         # se não cabe e já temos algo no pack, tenta o próximo
         if est > remaining and pack["chunks"]:
             continue
 
-        # tentativa de poda para caber no orçamento
-        while est > remaining and "\n" in snippet:
-            snippet = "\n".join(snippet.splitlines()[:-3])  # corta 3 linhas por iteração
+        # tentativa de poda adicional para caber no orçamento restante
+        while est > remaining and "\n" in snippet and len(snippet) > 50:
+            lines = snippet.splitlines()
+            # Poda mais agressiva - remove 5 linhas por vez
+            snippet = "\n".join(lines[:-5]) if len(lines) > 5 else lines[0]
             est = est_tokens(snippet)
-            if len(snippet) < 40:
+            if len(snippet) < 50:
                 break
 
         pack["chunks"].append({
@@ -456,11 +469,12 @@ def build_context_pack(
             "header": header,
             "summary": summary,
             "content_snippet": snippet,
+            "estimated_tokens": est,  # Adicionar estimativa para debug
         })
         pack["total_tokens"] += est
         remaining = max(0, remaining - est)
 
-        if len(pack["chunks"]) >= max_chunks or remaining <= 0:
+        if len(pack["chunks"]) >= max_chunks or remaining <= 50:  # Parar se restam poucos tokens
             break
 
     # --- LOG MÉTRICAS CSV ---
@@ -641,7 +655,7 @@ class EnhancedCodeIndexer:
         # Se busca semântica não habilitada, retorna apenas BM25
         if not use_semantic or not self.semantic_engine:
             return bm25_results[:top_k]
-        
+
         # Busca híbrida
         try:
             semantic_results = self.semantic_engine.hybrid_search(
@@ -653,38 +667,37 @@ class EnhancedCodeIndexer:
                 use_mmr=use_mmr
             )
             return semantic_results
-            
         except Exception as e:
             import sys
             sys.stderr.write(f"⚠️  Erro na busca semântica, usando apenas BM25: {e}\n")
             return bm25_results[:top_k]
-    
-    def build_context_pack(self, 
+
+    def build_context_pack(self,
                           query: str,
-                          budget_tokens: int = 3000,
-                          max_chunks: int = 10,
+                          budget_tokens: int = 2000,  # Alinhado com servidor
+                          max_chunks: int = 5,        # Alinhado com servidor
                           strategy: str = "mmr",
                           use_semantic: Optional[bool] = None) -> Dict:
         """
         Constrói pacote de contexto otimizado
-        
+
         Args:
             query: Consulta de busca
             budget_tokens: Orçamento máximo de tokens
             max_chunks: Número máximo de chunks
             strategy: Estratégia de seleção ("mmr" ou "topk")
             use_semantic: Se usar busca semântica
-            
+
         Returns:
             Pacote de contexto formatado
         """
         # Busca chunks relevantes
         search_results = self.search_code(
-            query=query, 
+            query=query,
             top_k=max_chunks * 3,  # Busca mais para melhor seleção
             use_semantic=use_semantic
         )
-        
+
         # Usa função de construção de contexto base integrada
         try:
             # Simula resultado de busca no formato esperado pela função base
@@ -694,7 +707,7 @@ class EnhancedCodeIndexer:
                     'chunk_id': result['chunk_id'],
                     'score': result['score']
                 })
-            
+
             # Constrói pack usando função base
             pack = build_context_pack(
                 self.base_indexer,
@@ -703,19 +716,19 @@ class EnhancedCodeIndexer:
                 max_chunks=max_chunks,
                 strategy=strategy
             )
-            
+
             # Adiciona informações sobre tipo de busca usada
             pack['search_type'] = 'hybrid' if (use_semantic and self.enable_semantic) else 'bm25'
             pack['semantic_enabled'] = self.enable_semantic
             pack['auto_indexing_enabled'] = self.enable_auto_indexing
-            
+
             return pack
-            
+
         except Exception as e:
             import sys
             sys.stderr.write(f"❌ Erro ao construir contexto: {e}\n")
             return {"query": query, "total_tokens": 0, "chunks": [], "error": str(e)}
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Retorna estatísticas do indexador"""
         return {
@@ -772,9 +785,9 @@ def enhanced_index_repo_paths(
     )
 
 def enhanced_search_code(
-    indexer: EnhancedCodeIndexer, 
-    query: str, 
-    top_k: int = 30, 
+    indexer: EnhancedCodeIndexer,
+    query: str,
+    top_k: int = 30,
     filters: Optional[Dict] = None,
     semantic_weight: float = None,
     use_mmr: bool = True
@@ -783,6 +796,21 @@ def enhanced_search_code(
     # Os parâmetros semantic_weight e use_mmr são mantidos para compatibilidade
     # mas podem não ser usados dependendo da implementação do indexer
     return indexer.search_code(query=query, top_k=top_k, filters=filters)
+
+def enhanced_build_context_pack(
+    indexer: EnhancedCodeIndexer,
+    query: str,
+    budget_tokens: int = 2000,  # Alinhado com servidor
+    max_chunks: int = 5,        # Alinhado com servidor
+    strategy: str = "mmr"
+) -> Dict:
+    """Wrapper para construir pacote de contexto alinhado com servidor"""
+    return indexer.build_context_pack(
+        query=query,
+        budget_tokens=budget_tokens,
+        max_chunks=max_chunks,
+        strategy=strategy,
+    )
 
 def enhanced_build_context_pack(
     indexer: EnhancedCodeIndexer,

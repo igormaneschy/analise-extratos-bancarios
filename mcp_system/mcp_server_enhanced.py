@@ -348,10 +348,13 @@ if HAS_FASTMCP:
 
     @mcp.tool()
     def context_pack(query: str,
-                     token_budget: int = 8000,
-                     max_chunks: int = 20,
+                     token_budget: int = 2000,  # Reduzido de 8000 para 2000
+                     max_chunks: int = 5,       # Reduzido de 20 para 5
                      strategy: str = "mmr") -> dict:
         """Cria pacote de contexto otimizado para LLMs"""
+        # Validações de entrada
+        token_budget = max(500, min(token_budget, 5000))  # Entre 500 e 5000
+        max_chunks = max(1, min(max_chunks, 10))          # Entre 1 e 10
         return _handle_context_pack(query, token_budget, max_chunks, strategy)
 
     @mcp.tool()
@@ -426,8 +429,8 @@ else:
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "token_budget": {"type": "integer", "default": 8000},
-                        "max_chunks": {"type": "integer", "default": 20},
+                        "token_budget": {"type": "integer", "default": 2000, "minimum": 500, "maximum": 5000},
+                        "max_chunks": {"type": "integer", "default": 5, "minimum": 1, "maximum": 10},
                         "strategy": {"type": "string", "default": "mmr"}
                     },
                     "required": ["query"]
@@ -488,8 +491,8 @@ else:
             elif name == "context_pack":
                 return _handle_context_pack(
                     arguments.get("query"),
-                    arguments.get("token_budget", 8000),
-                    arguments.get("max_chunks", 20),
+                    arguments.get("token_budget", 2000),
+                    arguments.get("max_chunks", 5),
                     arguments.get("strategy", "mmr")
                 )
             elif name == "auto_index":

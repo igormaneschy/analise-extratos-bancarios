@@ -1,4 +1,24 @@
 [2025-08-25] - Assistant
+Arquivos: tests/unit/test_readers_phase1.py, src/infrastructure/readers/excel_reader.py
+Ação/Tipo: Teste
+Descrição: Adiciona testes de leitores (Excel/CSV) para cenários de erro e extração de saldos. Ajuste em Excel _parse_amount.
+Detalhes:
+Problema: Baixa cobertura e falta de validação de fluxos de erro e extração de saldos nos readers.
+Causa: Ausência de testes específicos e assinatura limitada de _parse_amount no Excel reader para reutilização.
+Solução: Criados testes unitários para erros de colunas ausentes e métodos auxiliares; _parse_amount passou a retornar (valor, tipo) e foi ajustado nos pontos de uso.
+Observações: Cobertura do excel_reader subiu para 92% e csv_reader para 76%; suíte total agora com 69% de cobertura.
+
+[2025-08-25] - Assistant
+Arquivos: tests/unit/test_basic_analyzer.py, tests/unit/test_text_report.py
+Ação/Tipo: Teste
+Descrição: Adiciona testes unitários para BasicStatementAnalyzer e TextReportGenerator, elevando cobertura.
+Detalhes:
+Problema: Cobertura baixa em analyzer e reports, com risco de regressões não detectadas.
+Causa: Ausência de testes unitários específicos para alertas, insights e conteúdo de relatórios.
+Solução: Criados testes que validam resumos, alerts, insights e geração/gravação de relatórios em texto.
+Observações: Cobertura total do basic_analyzer atingiu 100% e text_report subiu para 55%.
+
+[2025-08-25] - Assistant
 Arquivos: mcp_system/scripts/summarize_metrics.py, mcp_system/mcp_server_enhanced.py, mcp_system/reindex.py, mcp_system/code_indexer_enhanced.py
 Ação/Tipo: Melhoria
 Descrição: Separa métricas de contexto e indexação em arquivos distintos, adiciona agrupamento por fuso horário e registra métricas na indexação inicial do servidor.
