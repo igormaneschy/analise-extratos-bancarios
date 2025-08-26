@@ -73,3 +73,7 @@ Thumbs.db
 *.tmp
 *.bak
 temp/
+
+#Logs e chunks do MCP_SYSTEM 
+
+mcp_system/.mcp_index/
