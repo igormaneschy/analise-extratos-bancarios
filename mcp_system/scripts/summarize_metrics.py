@@ -1,29 +1,23 @@
-
 #!/usr/bin/env python3
 """
-Resumo de métricas do MCP a partir de arquivos CSV na pasta mcp_system/.mcp_index
+Resumo de métricas do MCP (atualizado para o contexto atual)
 
-Agora com suporte a múltiplas fontes por padrão:
-- metrics_context.csv (consultas/context_pack)
-- metrics_index.csv (indexações)
-- metrics.csv (legado)
+- Consolida métricas de contexto e indexação: .mcp_index/metrics_context.csv e .mcp_index/metrics_index.csv
+- Fallback para arquivo legado: .mcp_index/metrics.csv
+- Suporta filtro por período, termo e fuso horário
+- Saída JSON ou texto
 
-Campos esperados nos CSVs:
-  Contexto: ts, query, chunk_count, total_tokens, budget_tokens, budget_utilization, latency_ms
-  Indexação: ts, op, path, index_dir, files_indexed, chunks, recursive, include_globs, exclude_globs, elapsed_s
-
-Uso básico:
-  python summarize_metrics.py                # lê todas as fontes acima automaticamente
-  python summarize_metrics.py --file mcp_system/.mcp_index/metrics_context.csv
-  python summarize_metrics.py --since 7
-  python summarize_metrics.py --filter "minha funcao"
-  python summarize_metrics.py --json
-  python summarize_metrics.py --tz local|utc  # agrupamento por dia no fuso desejado (default: local)
+Uso:
+  python mcp_system/scripts/summarize_metrics.py                # lê apenas contexto por padrão
+  python mcp_system/scripts/summarize_metrics.py --include-index # inclui métricas de indexação (em seção separada)
+  python mcp_system/scripts/summarize_metrics.py --file .mcp_index/metrics_context.csv
+  python mcp_system/scripts/summarize_metrics.py --since 7 --tz utc --json
+  python -m mcp_system.scripts.summarize_metrics --since 7 --tz utc --json
 """
 
 import os, sys, csv, argparse, datetime as dt, statistics as st, json
 from math import floor
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import pathlib
 
 # Diretórios de referência
@@ -44,7 +38,7 @@ def p95(vals: List[float]) -> float:
 
 def coerce_int(s, default=0):
     try:
-        return int(s)
+        return int(float(s))
     except (ValueError, TypeError):
         return default
 
@@ -60,10 +54,10 @@ def parse_dt(s: str) -> Optional[dt.datetime]:
     if not s:
         return None
     # Tentar diferentes formatos de data
-    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S"]:
+    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S.%f"]:
         try:
             d = dt.datetime.strptime(s, fmt)
-            # Se não tem timezone (%z), assume UTC para manter consistência
+            # Se não tem timezone, assume UTC para consistência
             if "%z" not in fmt:
                 d = d.replace(tzinfo=dt.timezone.utc)
             return d
@@ -98,65 +92,93 @@ def _resolve_path(path_arg: str) -> pathlib.Path:
     return p
 
 
-def _load_context_csv(path: pathlib.Path) -> List[Dict[str, Any]]:
+def _normalize_utilization(val: Any) -> float:
+    """Normaliza budget_utilization para 0..100 (se vier 0..1, multiplica por 100)."""
+    v = coerce_float(val, 0.0)
+    if 0.0 <= v <= 1.0:
+        v *= 100.0
+    return v
+
+
+def _read_csv(path: pathlib.Path) -> Tuple[List[Dict[str, Any]], List[str]]:
     rows: List[Dict[str, Any]] = []
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        # Valida presença de coluna "query" para confirmar tipo
-        has_query = "query" in (reader.fieldnames or [])
+        fieldnames = reader.fieldnames or []
         for row in reader:
-            if not has_query:
-                # Converter métrica de indexação para formato de contexto
-                rows.append({
-                    "ts": row.get("ts", ""),
-                    "query": f"index_{row.get('op', 'unknown')}",
-                    "chunk_count": str(coerce_int(row.get("chunks", 0))),
-                    "total_tokens": str(coerce_int(row.get("chunks", 0)) * 50),  # Estimativa
-                    "budget_tokens": "8000",
-                    "budget_utilization": str(coerce_float(row.get("chunks", 0)) * 50 / 8000 * 100),
-                    "latency_ms": str(coerce_float(row.get("elapsed_s", 0)) * 1000),
-                })
-            else:
-                rows.append(row)
-    return rows
+            rows.append(row)
+    return rows, fieldnames
 
 
-def load_rows(args) -> List[Dict[str, Any]]:
-    # Se --file for informado, lê apenas aquele arquivo
+def _convert_index_to_context(row: Dict[str, Any]) -> Dict[str, Any]:
+    chunks = coerce_int(row.get("chunks", 0))
+    elapsed_s = coerce_float(row.get("elapsed_s", 0))
+    estimated_tokens = chunks * 50  # Estimativa simples
+    return {
+        "ts": row.get("ts", ""),
+        "query": f"index_{row.get('op', 'unknown')}",
+        "chunk_count": str(chunks),
+        "total_tokens": str(estimated_tokens),
+        "budget_tokens": "8000",
+        "budget_utilization": str(min(100.0, (estimated_tokens / 8000) * 100)),
+        "latency_ms": str(elapsed_s * 1000),
+    }
+
+
+def load_context_rows(args) -> List[Dict[str, Any]]:
+    # Se --file for informado, ler somente se for um CSV de contexto (tem coluna 'query')
     if args.file:
         p = _resolve_path(args.file)
         if not p.exists():
             print(f"[erro] CSV não encontrado: {p}")
             sys.exit(1)
-        return _load_context_csv(p)
+        rows, fields = _read_csv(p)
+        if "query" not in fields:
+            return []
+        out = []
+        for r in rows:
+            r = dict(r)
+            r["budget_utilization"] = _normalize_utilization(r.get("budget_utilization"))
+            out.append(r)
+        return out
 
-    # Sem --file: tentar múltiplas fontes (contexto, index e legado) tanto em mcp_system quanto na raiz
-    candidates = [
-        DEFAULT_CONTEXT_PATH,
-        DEFAULT_INDEX_PATH,
-        LEGACY_METRICS_PATH,
-        # Fallbacks na raiz do projeto
-        ROOT_DIR.parent / ".mcp_index" / "metrics_context.csv",
-        ROOT_DIR.parent / ".mcp_index" / "metrics_index.csv",
-        ROOT_DIR.parent / ".mcp_index" / "metrics.csv",
-    ]
+    # Caso padrão: procurar contexto e legado
+    candidates = [DEFAULT_CONTEXT_PATH, LEGACY_METRICS_PATH]
+    out: List[Dict[str, Any]] = []
+    for c in candidates:
+        if not c.exists():
+            continue
+        rows, fields = _read_csv(c)
+        if "query" not in fields:
+            # pular arquivos de indexação aqui
+            continue
+        for r in rows:
+            r = dict(r)
+            r["budget_utilization"] = _normalize_utilization(r.get("budget_utilization"))
+            out.append(r)
+    return out
 
-    found = [p for p in candidates if p.exists()]
-    if not found:
-        print("[erro] Nenhum CSV de métricas encontrado. Locais esperados:")
-        for c in candidates:
-            print(f"  - {c}")
-        print("\nDica: gere métricas executando consultas (context_pack) ou reindexações; ou informe o caminho via --file.")
-        sys.exit(1)
 
-    all_rows: List[Dict[str, Any]] = []
-    for p in found:
-        try:
-            all_rows.extend(_load_context_csv(p))
-        except Exception as e:
-            print(f"[aviso] Falha ao ler {p}: {e}")
+def load_index_rows(args) -> List[Dict[str, Any]]:
+    # Se --file for informado e não for de contexto, tratar como index
+    if args.file:
+        p = _resolve_path(args.file)
+        if not p.exists():
+            print(f"[erro] CSV não encontrado: {p}")
+            sys.exit(1)
+        rows, fields = _read_csv(p)
+        if "query" in fields:
+            return []
+        out = []
+        for r in rows:
+            out.append(_convert_index_to_context(r))
+        return out
 
-    return all_rows
+    # Padrão: metrics_index.csv
+    if not DEFAULT_INDEX_PATH.exists():
+        return []
+    rows, _ = _read_csv(DEFAULT_INDEX_PATH)
+    return [_convert_index_to_context(r) for r in rows]
 
 
 def filter_rows(rows: List[Dict], since_days: int = 0, query_filter: str = "") -> List[Dict]:
@@ -174,13 +196,8 @@ def format_dt(d: dt.datetime) -> str:
     return d.strftime("%Y-%m-%d")
 
 
-def summarize(rows: List[Dict], args):
-    if not rows:
-        print("Nenhum dado encontrado.")
-        return
-
+def _compute_stats(rows: List[Dict], tz_mode: str, ignore_zero_latency: bool) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     # Converter timestamps e ordenar
-    tz_mode = args.tz
     parsed_rows = []
     for r in rows:
         d = parse_dt(r.get("ts"))
@@ -195,21 +212,22 @@ def summarize(rows: List[Dict], args):
     last_ts = parsed_rows[-1][1] if parsed_rows else None
 
     # Converter valores para números
-    chunk_counts = [coerce_int(r[0]["chunk_count"]) for r in parsed_rows]
-    total_tokens_list = [coerce_int(r[0]["total_tokens"]) for r in parsed_rows]
-    budget_utilizations = [coerce_float(r[0]["budget_utilization"]) for r in parsed_rows]
-    latencies = [coerce_float(r[0]["latency_ms"]) for r in parsed_rows]
+    chunk_counts = [coerce_int(r[0].get("chunk_count")) for r in parsed_rows]
+    total_tokens_list = [coerce_int(r[0].get("total_tokens")) for r in parsed_rows]
+    budget_utilizations = [coerce_float(r[0].get("budget_utilization")) for r in parsed_rows]
+    latencies_all = [coerce_float(r[0].get("latency_ms")) for r in parsed_rows]
+    latencies_p = [v for v in latencies_all if v > 0] if ignore_zero_latency else latencies_all
 
     # Calcular estatísticas
     avg_chunks = st.mean(chunk_counts) if chunk_counts else 0
     avg_tokens = st.mean(total_tokens_list) if total_tokens_list else 0
     avg_util = st.mean(budget_utilizations) if budget_utilizations else 0
-    avg_latency = st.mean(latencies) if latencies else 0
+    avg_latency = st.mean(latencies_all) if latencies_all else 0
 
     p95_chunks = p95(chunk_counts)
     p95_tokens = p95(total_tokens_list)
     p95_util = p95(budget_utilizations)
-    p95_latency = p95(latencies)
+    p95_latency = p95(latencies_p)
 
     # Agrupar por dia (no fuso escolhido)
     daily_stats: Dict[str, Dict[str, List[float]]] = {}
@@ -223,14 +241,15 @@ def summarize(rows: List[Dict], args):
                 "budget_utilizations": [],
                 "latencies": [],
             }
-        daily_stats[day]["chunk_counts"].append(coerce_int(r["chunk_count"]))
-        daily_stats[day]["total_tokens"].append(coerce_int(r["total_tokens"]))
-        daily_stats[day]["budget_utilizations"].append(coerce_float(r["budget_utilization"]))
-        daily_stats[day]["latencies"].append(coerce_float(r["latency_ms"]))
+        daily_stats[day]["chunk_counts"].append(coerce_int(r.get("chunk_count")))
+        daily_stats[day]["total_tokens"].append(coerce_int(r.get("total_tokens")))
+        daily_stats[day]["budget_utilizations"].append(coerce_float(r.get("budget_utilization")))
+        daily_stats[day]["latencies"].append(coerce_float(r.get("latency_ms")))
 
-    # Converter para formato de tabela
     daily_rows = []
     for day, stats in sorted(daily_stats.items()):
+        lat_all = stats["latencies"]
+        lat_p = [v for v in lat_all if v > 0] if ignore_zero_latency else lat_all
         daily_rows.append({
             "day": day,
             "avg_chunks": st.mean(stats["chunk_counts"]) if stats["chunk_counts"] else 0,
@@ -242,43 +261,39 @@ def summarize(rows: List[Dict], args):
             "avg_util": st.mean(stats["budget_utilizations"]) if stats["budget_utilizations"] else 0,
             "median_util": st.median(stats["budget_utilizations"]) if stats["budget_utilizations"] else 0,
             "p95_util": p95(stats["budget_utilizations"]),
-            "avg_latency": st.mean(stats["latencies"]) if stats["latencies"] else 0,
-            "median_latency": st.median(stats["latencies"]) if stats["latencies"] else 0,
-            "p95_latency": p95(stats["latencies"]),
+            "avg_latency": st.mean(lat_all) if lat_all else 0,
+            "median_latency": st.median(lat_p) if lat_p else 0,
+            "p95_latency": p95(lat_p),
         })
 
-    # Saída JSON se solicitado
-    if args.json:
-        output = {
-            "summary": {
-                "period_start": format_dt(_as_tz(first_ts, tz_mode)) if first_ts else "",
-                "period_end": format_dt(_as_tz(last_ts, tz_mode)) if last_ts else "",
-                "total_queries": total_rows,
-                "avg_chunks": avg_chunks,
-                "avg_tokens": avg_tokens,
-                "avg_budget_utilization_pct": avg_util,
-                "avg_latency_ms": avg_latency,
-                "p95_chunks": p95_chunks,
-                "p95_tokens": p95_tokens,
-                "p95_budget_utilization_pct": p95_util,
-                "p95_latency_ms": p95_latency,
-            },
-            "daily": daily_rows,
-        }
-        print(json.dumps(output, indent=2))
-        return
+    summary = {
+        "period_start": format_dt(_as_tz(first_ts, tz_mode)) if first_ts else "",
+        "period_end": format_dt(_as_tz(last_ts, tz_mode)) if last_ts else "",
+        "total_queries": total_rows,
+        "avg_chunks": avg_chunks,
+        "avg_tokens": avg_tokens,
+        "avg_budget_utilization_pct": avg_util,
+        "avg_latency_ms": avg_latency,
+        "p95_chunks": p95_chunks,
+        "p95_tokens": p95_tokens,
+        "p95_budget_utilization_pct": p95_util,
+        "p95_latency_ms": p95_latency,
+    }
 
-    # Saída em texto formatado
-    print("=== RESUMO DE MÉTRICAS DO MCP ===")
+    return summary, daily_rows
+
+
+def _print_text(summary: Dict[str, Any], daily_rows: List[Dict[str, Any]], section_title: str = "RESUMO DE MÉTRICAS DO MCP"):
+    print(f"=== {section_title} ===")
     print(
-        f"Período: {format_dt(_as_tz(first_ts, tz_mode)) if first_ts else 'N/A'} a {format_dt(_as_tz(last_ts, tz_mode)) if last_ts else 'N/A'} ({total_rows} entradas)"
+        f"Período: {summary['period_start'] or 'N/A'} a {summary['period_end'] or 'N/A'} ({summary['total_queries']} entradas)"
     )
     print()
     print("Média Geral:")
-    print(f"  Chunks:     {avg_chunks:.1f} (p95: {p95_chunks:.1f})")
-    print(f"  Tokens:     {avg_tokens:.0f} (p95: {p95_tokens:.0f})")
-    print(f"  Utilização: {avg_util:.1f}% (p95: {p95_util:.1f}%)")
-    print(f"  Latência:   {avg_latency:.1f}ms (p95: {p95_latency:.1f}ms)")
+    print(f"  Chunks:     {summary['avg_chunks']:.1f} (p95: {summary['p95_chunks']:.1f})")
+    print(f"  Tokens:     {summary['avg_tokens']:.0f} (p95: {summary['p95_tokens']:.0f})")
+    print(f"  Utilização: {summary['avg_budget_utilization_pct']:.1f}% (p95: {summary['p95_budget_utilization_pct']:.1f}%)")
+    print(f"  Latência:   {summary['avg_latency_ms']:.1f}ms (p95: {summary['p95_latency_ms']:.1f}ms)")
     print()
     print("Diário:")
     print(f"{'Dia':<12} {'Chunks':<24} {'Tokens':<24} {'Utilização':<24} {'Latência (ms)':<24}")
@@ -293,24 +308,58 @@ def summarize(rows: List[Dict], args):
         print(f"{row['day']:<12} {chunks_str:<24} {tokens_str:<24} {util_str:<24} {latency_str:<24}")
 
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Resumo de métricas do MCP")
+    parser = argparse.ArgumentParser(description="Resumo de métricas do MCP (atualizado)")
     parser.add_argument(
         "--file",
         default="",
-        help="Arquivo CSV de métricas específico. Se omitido, lê todas as fontes padrões (context, index e legado).",
+        help="Arquivo CSV de métricas específico. Se omitido, lê contexto (.mcp_index/metrics_context.csv) e permite incluir index com --include-index.",
     )
     parser.add_argument("--since", type=int, default=0, help="Filtrar por dias recentes")
     parser.add_argument("--filter", default="", help="Filtrar por termo na query")
     parser.add_argument("--tz", choices=["local", "utc"], default="local", help="Fuso horário para agrupamento diário")
     parser.add_argument("--json", action="store_true", help="Saída em JSON")
+    parser.add_argument("--include-index", action="store_true", help="Incluir métricas de indexação em seção separada")
+    parser.add_argument("--ignore-zero-latency", action="store_true", help="Ignorar latências 0 apenas para mediana/p95")
 
     args = parser.parse_args()
 
     try:
-        rows = load_rows(args)
-        rows = filter_rows(rows, args.since, args.filter)
-        summarize(rows, args)
+        # Carregar contexto
+        context_rows = load_context_rows(args)
+        context_rows = filter_rows(context_rows, args.since, args.filter)
+
+        # Opcional: carregar index
+        index_rows: List[Dict[str, Any]] = []
+        if args.include_index:
+            index_rows = load_index_rows(args)
+            index_rows = filter_rows(index_rows, args.since, args.filter)
+
+        if args.json:
+            ctx_summary, ctx_daily = _compute_stats(context_rows, args.tz, args.ignore_zero_latency)
+            output: Dict[str, Any] = {"context": {"summary": ctx_summary, "daily": ctx_daily}}
+            if args.include_index:
+                idx_summary, idx_daily = _compute_stats(index_rows, args.tz, args.ignore_zero_latency)
+                output["index"] = {"summary": idx_summary, "daily": idx_daily}
+            print(json.dumps(output, indent=2))
+            return
+
+        # Saída em texto
+        if context_rows:
+            ctx_summary, ctx_daily = _compute_stats(context_rows, args.tz, args.ignore_zero_latency)
+            _print_text(ctx_summary, ctx_daily, section_title="RESUMO (CONTEXTO)")
+        else:
+            print("Nenhum dado de CONTEXTO encontrado.")
+
+        if args.include_index:
+            print()  # separador
+            if index_rows:
+                idx_summary, idx_daily = _compute_stats(index_rows, args.tz, args.ignore_zero_latency)
+                _print_text(idx_summary, idx_daily, section_title="RESUMO (INDEXAÇÃO)")
+            else:
+                print("Nenhum dado de INDEXAÇÃO encontrado.")
+
     except SystemExit:
         raise
     except Exception as e:

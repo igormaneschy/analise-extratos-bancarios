@@ -1,189 +1,107 @@
-# Sistema de Análise de Extratos Bancários
+# Sistema de Análise de Extratos Bancários + MCP System
 
-Sistema Python para análise automatizada de extratos bancários com extração de dados, categorização de transações e geração de relatórios financeiros.
+Este repositório contém:
+- Uma aplicação Python para análise automatizada de extratos bancários (PDF, Excel e CSV)
+- Um Servidor MCP autocontido (mcp_system) com indexação de código, busca híbrida (BM25 + semântica), empacotamento de contexto e memória de sessões
 
-## 🎯 Objetivo
+## Quick start
 
-Automatizar a análise de extratos bancários em PDF, Excel e CSV, extraindo informações relevantes como:
-- **Transações**: Data, valor, descrição, tipo
-- **Saldos**: Inicial, final, médio do período
-- **Categorização**: Classificação automática por tipo de gasto
-- **Relatórios**: Resumos e análises financeiras
+- Requisitos gerais: Python 3.11+
+- MCP: requer a biblioteca FastMCP instalada no ambiente do servidor
 
-## ✨ Funcionalidades
+Aplicação (CLI) de análise:
+- Execute os testes ou comandos conforme sua automação local.
 
-### 📄 **Processamento de PDFs, Excel e CSV**
-- Extração de texto de extratos bancários em PDF
-- Leitura de extratos em formato Excel (XLSX)
-- Leitura de extratos em formato CSV
-- Suporte a múltiplos formatos de bancos europeus
-- Detecção automática de layout
+Servidor MCP:
+- O servidor MCP é carregado como módulo Python: `mcp_system.mcp_server_enhanced`
+- O cliente MCP/host é responsável por inicializar o servidor; durante o startup você deverá ver logs no stderr, por exemplo:
+  - `[mcp_server_enhanced] 🚀 Iniciando indexação automática inicial...`
+  - `[mcp_server_enhanced] ✅ Indexação inicial concluída`
+  - `[mcp_server_enhanced] 🧠 Memory DB em uso: <...>/mcp_system/.mcp_memory/memory.db`
 
-### 🏷️ **Categorização Inteligente**
-- Classificação automática de transações
-- Categorias personalizáveis
-- Detecção de padrões de gasto
+## Arquitetura e auto-contenção do MCP
 
-### 📊 **Análise Financeira**
-- Resumo de receitas e despesas
-- Análise de fluxo de caixa
-- Identificação de tendências de gastos
-- Alertas financeiros personalizados
+Todos os artefatos do servidor MCP ficam dentro da pasta `mcp_system` por padrão:
+- `mcp_system/.mcp_index/` — índices e métricas (ex.: `metrics_index.csv`, `metrics_context.csv`)
+- `mcp_system/.mcp_memory/` — memória (SQLite) contendo a tabela `session_summaries`
+- `mcp_system/.emb_cache/` — cache de embeddings/modelos (quando aplicável)
 
-### 📈 **Visualização e Relatórios**
-- Relatórios em formato texto
-- Relatórios em formato Markdown
-- Visualizações no terminal com Rich
-- Exportação de dados
+Mecanismos de proteção:
+- O indexador ignora por padrão (`DEFAULT_EXCLUDE`): `**/.mcp_index/**`, `**/.mcp_memory/**`, `**/.emb_cache/**`, além de diretórios comuns (`.git`, `node_modules`, `dist`, `build`, `.venv`, `__pycache__`)
+- O file watcher também filtra eventos provenientes desses diretórios internos para evitar reindexação de artefatos do próprio servidor
 
-## 🚀 Começando
+## Variáveis de ambiente (MCP)
 
-### 📋 Pré-requisitos
+- `INDEX_ROOT` (default: diretório pai de `mcp_system`)
+  - Raiz do projeto a ser indexado. Não precisa ficar dentro de `mcp_system`; apenas os artefatos do servidor ficam.
+- `INDEX_DIR` (default: `mcp_system/.mcp_index`)
+  - Onde ficam os índices e métricas.
+- `EMBEDDINGS_CACHE_DIR` (default: `mcp_system/.emb_cache`)
+  - Diretório de cache para modelos (HuggingFace/Sentence-Transformers). O servidor também ajusta `SENTENCE_TRANSFORMERS_HOME`, `HF_HOME`, `HUGGINGFACE_HUB_CACHE` quando esse diretório é usado.
+- `AUTO_INDEX_ON_START` (default: `1`)
+  - Indexar automaticamente no startup.
+- `AUTO_INDEX_PATHS` (default: `.`)
+  - Caminhos (separados por `os.pathsep`) relativos a `INDEX_ROOT` a serem indexados no startup.
+- `AUTO_INDEX_RECURSIVE` (default: `1`)
+  - Indexação recursiva.
+- `AUTO_ENABLE_SEMANTIC` (default: `1`)
+  - Ativa re-rank semântico na busca (quando disponível).
+- `AUTO_START_WATCHER` (default: `1`)
+  - Inicia o file watcher após indexação.
+- `MEMORY_DIR` (opcional)
+  - Se definido, ajusta o diretório da memória. Pode ser relativo a `mcp_system` ou absoluto. Padrão é `mcp_system/.mcp_memory`.
 
-- Python 3.8 ou superior
-- pip (gerenciador de pacotes do Python)
+## Inicialização e logs (MCP)
 
-### 🔧 Instalação
+Fluxo no startup do servidor MCP:
+1) Indexação automática (se habilitada)
+2) Inicialização da memória (se disponível) e registro de um resumo da indexação inicial
+3) Início do watcher (se habilitado)
 
-1. Clone o repositório:
-```bash
-git clone <url-do-repositorio>
-cd sistema-analise-extratos
-```
+Logs esperados:
+- Disponibilidade da memória:
+  - `[mcp_server_enhanced] 🧠 MemoryStore disponível`
+  - ou (quando executado em contexto de pacote): `🧠 MemoryStore disponível (import relativo)`
+  - em falhas: `⚠️ MemoryStore indisponível: abs=...; rel=...`
+- Caminho do DB:
+  - `[mcp_server_enhanced] 🧠 Memory DB em uso: <...>/mcp_system/.mcp_memory/memory.db`
 
-2. Instale as dependências:
-```bash
-pip install -r requirements.txt
-```
+## Ferramentas MCP expostas
 
-### 📖 Uso
+- `index_path` — Indexa um caminho
+- `search_code` — Busca híbrida (BM25 + semântica quando disponível)
+- `context_pack` — Cria pacote de contexto com trechos relevantes
+- `auto_index` — Controla sistema de auto-indexação (start/stop/status)
+- `get_stats` — Estatísticas do indexador
+- `cache_management` — Gerencia caches (ex.: limpar cache de embeddings)
+- `where_we_stopped` — Resumo de últimos passos, próximos passos, bloqueios e pistas
 
-#### Análise de Extratos
+## Scripts utilitários (MCP)
 
-```bash
-# Analisar um extrato PDF
-python main.py analyze extrato.pdf
+Executando via módulo Python:
 
-# Analisar um extrato Excel
-python main.py analyze extrato.xlsx
+- Listar estatísticas:
+  - `python -m mcp_system.scripts.get_stats`
+- Resumir métricas (lê CSVs dentro de `mcp_system/.mcp_index`):
+  - `python -m mcp_system.scripts.summarize_metrics`
+- Visualizar métricas (quando aplicável):
+  - `python -m mcp_system.scripts.visual_metrics`
+- Dump da memória (sem sqlite3 CLI):
+  - JSON: `python -m mcp_system.scripts.memory_dump --limit 20`
+  - Tabela: `python -m mcp_system.scripts.memory_dump --limit 20 --table`
+  - Filtros: `--project`, `--scope`, `--contains`
+  - Diretório alternativo de memória: `--memory-dir <path>`
 
-# Analisar um extrato CSV
-python main.py analyze extrato.csv
+## Resolução de problemas
 
-# Salvar relatório em arquivo
-python main.py analyze extrato.pdf --output relatorio.txt
+- Não aparece o log do DB de memória
+  - Verifique se há log de disponibilidade do MemoryStore
+  - Se indisponível: confirme dependências do Python e que o módulo `mcp_system` está acessível (o servidor tenta import absoluto e relativo)
+- Erro no watcher
+  - Confirme que diretórios internos (`.mcp_index`, `.mcp_memory`, `.emb_cache`) estão sendo filtrados
+- Busca semântica inativa
+  - O servidor funciona com BM25 puro; a reordenação semântica é ativada quando bibliotecas de embeddings estão disponíveis
 
-# Gerar relatório em Markdown
-python main.py analyze extrato.xlsx --format markdown --output relatorio.md
-```
+## Sobre a aplicação de análise de extratos
 
-#### Criar Instruções de Uso
-
-```bash
-# Gera um arquivo com instruções de uso
-python main.py sample instrucoes.txt
-```
-
-## 📁 Estrutura de Arquivos CSV
-
-Para que o sistema possa processar corretamente um arquivo CSV, ele deve conter as seguintes colunas:
-
-### Colunas Obrigatórias:
-- **Data da transação** (formatos aceitos: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD)
-- **Descrição da transação**
-- **Valor da transação** (positivo para receitas, negativo para despesas)
-
-### Colunas Opcionais:
-- **Saldo após a transação**
-- **Número da conta**
-- **Saldo inicial/final**
-
-### Exemplo de Estrutura:
-
-```csv
-data,descricao,valor,saldo
-01/01/2023,Salário Janeiro,2500.00,2500.00
-02/01/2023,Supermercado,-150.50,2349.50
-03/01/2023,Conta de Luz,-80.00,2269.50
-```
-
-## 💰 Moedas Suportadas
-
-O sistema detecta automaticamente a moeda do extrato:
-- EUR (Euro) - Padrão
-- USD (Dólar Americano)
-- BRL (Real Brasileiro)
-- GBP (Libra Esterlina)
-- JPY (Iene Japonês)
-- CHF (Franco Suíço)
-- CAD (Dólar Canadense)
-- AUD (Dólar Australiano)
-
-## 🧪 Testes
-
-Execute os testes para verificar a integridade do sistema:
-
-```bash
-# Executar todos os testes
-python -m pytest tests/
-
-# Executar testes com cobertura
-python -m pytest --cov=src tests/
-```
-
-## 🛠️ Tecnologias Utilizadas
-
-- **Python 3.8+**
-- **pdfplumber** - Extração de texto de PDFs
-- **pandas** - Processamento de dados Excel e CSV
-- **rich** - Interface de terminal avançada
-- **click** - Interface de linha de comando
-- **reportlab** - Geração de relatórios PDF (futuro)
-- **matplotlib** - Visualizações gráficas (futuro)
-
-## 📦 Estrutura do Projeto
-
-```
-sistema-analise-extratos/
-├── src/
-│   ├── domain/          # Modelos e interfaces de domínio
-│   ├── application/     # Casos de uso
-│   ├── infrastructure/  # Implementações concretas
-│   └── presentation/    # Interface com o usuário
-├── tests/               # Testes automatizados
-├── data/                # Dados de exemplo
-├── main.py              # Ponto de entrada CLI
-└── requirements.txt     # Dependências
-```
-
-## 📈 Roadmap
-
-- [x] Processamento de PDFs
-- [x] Processamento de Excel
-- [x] Processamento de CSV
-- [x] Categorização automática
-- [x] Geração de relatórios
-- [ ] Interface web
-- [ ] API REST
-- [ ] Machine Learning para categorização
-- [ ] Suporte a mais bancos
-- [ ] Visualizações gráficas
-- [ ] Exportação para diferentes formatos
-
-## 🤝 Contribuindo
-
-1. Faça um fork do projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
-
-## 📄 Licença
-
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
-
-## 📧 Contato
-
-Seu Nome - [@seu_perfil](https://twitter.com/seu_perfil) - email@example.com
-
-Link do Projeto: [https://github.com/seu_usuario/sistema-analise-extratos](https://github.com/seu_usuario/sistema-analise-extratos)
+A aplicação extrai e analisa transações de PDF/Excel/CSV, calcula saldos e pode categorizar gastos. Consulte os testes e exemplos em `data/samples` para uso básico.

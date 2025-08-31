@@ -6,6 +6,26 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 import pathlib
 
+try:
+    from memory_store import store_session_summary, store_next_action
+    _HAS_MEM = True
+except Exception:
+    try:
+        from .memory_store import store_session_summary, store_next_action
+        _HAS_MEM = True
+    except Exception:
+        _HAS_MEM = False
+
+
+# Função utilitária para obter timestamps UTC padronizados
+def utc_timestamp() -> str:
+    """Retorna timestamp UTC formatado em ISO 8601 segundos.
+
+    Returns:
+        str: Timestamp no formato 'YYYY-MM-DDTHH:MM:SS'
+    """
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
 #logs para métricas
 
 # Diretório atual deste módulo para resoluções relativas ao pacote mcp_system
@@ -51,9 +71,22 @@ DEFAULT_INCLUDE = [
     "**/*.rs","**/*.swift","**/*.kt","**/*.kts","**/*.sql","**/*.sh"
 ]
 DEFAULT_EXCLUDE = [
-    "**/.git/**","**/node_modules/**","**/dist/**","**/build/**",
-    "**/.venv/**","**/__pycache__/**"
+    "**/.git/**",
+    "**/.hg/**",
+    "**/.svn/**",
+    "**/__pycache__/**",
+    "**/.mcp_index/**",
+    "**/.mcp_memory/**",
+    "**/.emb_cache/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/.tox/**",
+    "**/.cache/**",
 ]
+
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z_0-9]{1,}|[A-Za-z]{2,}")
 
@@ -81,39 +114,98 @@ class BaseCodeIndexer:
         self.inverted: Dict[str, Dict[str, int]] = {} # term -> {chunk_id: tf}
         self.doc_len: Dict[str, int] = {}             # chunk_id -> token count
         self.file_mtime: Dict[str, float] = {}        # file_path -> mtime
+        self.last_updated: Optional[str] = None       # ISO8601 (UTC)
         self._load()
 
     # ---------- persistence ----------
     def _paths(self):
         return (
             self.index_dir / "chunks.jsonl",
-            self.index_dir / "inverted.json",
+            self.index_dir / "inverted_index.json",
             self.index_dir / "doclen.json",
             self.index_dir / "file_mtime.json",
+            self.index_dir / "meta.json",
         )
 
     def _load(self):
-        chunks_p, inv_p, dl_p, mt_p = self._paths()
-        if chunks_p.exists():
-            with chunks_p.open("r", encoding="utf-8") as f:
-                for line in f:
-                    obj = json.loads(line)
-                    self.chunks[obj["chunk_id"]] = obj
-        if inv_p.exists():
-            self.inverted = json.loads(inv_p.read_text(encoding="utf-8"))
-        if dl_p.exists():
-            self.doc_len = {k:int(v) for k,v in json.loads(dl_p.read_text(encoding="utf-8")).items()}
-        if mt_p.exists():
-            self.file_mtime = {k:float(v) for k,v in json.loads(mt_p.read_text(encoding="utf-8")).items()}
+        """Load index from disk"""
+        chunks_p = self.index_dir / "chunks.jsonl"
+        inv_p = self.index_dir / "inverted_index.json"
+        doclen_p = self.index_dir / "doclen.json"
+        mtimes_p = self.index_dir / "file_mtime.json"
+        meta_p = self.index_dir / "meta.json"
+
+        # Initialize with default empty structures
+        self.chunks = {}
+        self.inverted = {}
+        self.doc_len = {}
+        self.file_mtime = {}
+        self.last_updated = None
+
+        # Check if index directory exists
+        if not self.index_dir.exists():
+            self.index_dir.mkdir(parents=True, exist_ok=True)
+            return
+
+        # Load chunks if file exists and is not empty
+        if chunks_p.exists() and chunks_p.stat().st_size > 0:
+            try:
+                with open(chunks_p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():  # Skip empty lines
+                            chunk = json.loads(line)
+                            self.chunks[chunk["chunk_id"]] = chunk
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Warning: Could not load chunks file: {e}")
+                self.chunks = {}
+
+        # Load inverted index if file exists and is not empty
+        if inv_p.exists() and inv_p.stat().st_size > 0:
+            try:
+                self.inverted = json.loads(inv_p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Warning: Could not load inverted index file: {e}")
+                self.inverted = {}
+
+        # Load document lengths if file exists and is not empty
+        if doclen_p.exists() and doclen_p.stat().st_size > 0:
+            try:
+                self.doc_len = {k: int(v) for k, v in json.loads(doclen_p.read_text(encoding="utf-8")).items()}
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Warning: Could not load document lengths file: {e}")
+                self.doc_len = {}
+
+        # Load file modification times if file exists and is not empty
+        if mtimes_p.exists() and mtimes_p.stat().st_size > 0:
+            try:
+                self.file_mtime = {k: float(v) for k, v in json.loads(mtimes_p.read_text(encoding="utf-8")).items()}
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Warning: Could not load file mtimes file: {e}")
+                self.file_mtime = {}
+
+        # Load meta (last_updated)
+        if meta_p.exists() and meta_p.stat().st_size > 0:
+            try:
+                meta = json.loads(meta_p.read_text(encoding="utf-8"))
+                self.last_updated = meta.get("last_updated")
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Warning: Could not load meta file: {e}")
+                self.last_updated = None
 
     def _save(self):
-        chunks_p, inv_p, dl_p, mt_p = self._paths()
+        chunks_p, inv_p, dl_p, mt_p, meta_p = self._paths()
         with chunks_p.open("w", encoding="utf-8") as f:
             for c in self.chunks.values():
                 f.write(json.dumps(c, ensure_ascii=False) + "\n")
         inv_p.write_text(json.dumps(self.inverted), encoding="utf-8")
         dl_p.write_text(json.dumps(self.doc_len), encoding="utf-8")
         mt_p.write_text(json.dumps(self.file_mtime), encoding="utf-8")
+        # Update last_updated and persist meta
+        try:
+            self.last_updated = utc_timestamp()
+        except Exception:
+            self.last_updated = self.last_updated or None
+        meta_p.write_text(json.dumps({"last_updated": self.last_updated}, ensure_ascii=False), encoding="utf-8")
 
     # ---------- métricas e estatísticas ----------
     def get_stats(self) -> Dict[str, Any]:
@@ -125,6 +217,7 @@ class BaseCodeIndexer:
             "total_chunks": len(self.chunks),
             "total_files": len(set(c.get("file_path") for c in self.chunks.values())),
             "index_size_mb": round(index_size_bytes / (1024 * 1024), 3),
+            "last_updated": self.last_updated,
         }
 
     # ---------- chunking ----------
@@ -212,13 +305,56 @@ class BaseCodeIndexer:
 
 # ========== FUNÇÕES DE INDEXAÇÃO ==========
 
+import fnmatch
+import sys
+import re
+import math
+from collections import Counter
+
+def _glob_match(path: Path, pattern: str) -> bool:
+    s = path.as_posix()
+    # Normaliza padrões comuns para cobrir casos onde Path.match falha
+    candidates = {pattern}
+    if pattern.startswith("**/"):
+        candidates.add(pattern[3:])
+    if pattern.endswith("/**"):
+        # cobre um nível e múltiplos níveis
+        base = pattern[:-3]
+        candidates.add(base + "/*")
+        candidates.add(base + "/**/*")
+    return any(fnmatch.fnmatch(s, pat) for pat in candidates)
+
+
+def is_excluded(path: Path, exclude_globs: List[str]) -> bool:
+    # Filtro rápido por nome de diretório (não depende de glob)
+    deny_dirs = {
+        "venv", ".venv", "node_modules", "dist", "build",
+        "__pycache__", ".git", ".mcp_index", ".mcp_memory",
+        ".emb_cache", ".tox", ".cache"
+    }
+    if any(part in deny_dirs for part in path.parts):
+        import logging
+        logging.getLogger(__name__).debug(f"[is_excluded] Excluindo por nome de pasta: {path}")
+        return True
+    # Fallback para padrões glob
+    if exclude_globs:
+        if any(_glob_match(path, pat) for pat in exclude_globs):
+            import logging
+            logging.getLogger(__name__).debug(f"[is_excluded] Excluindo por padrão glob: {path}")
+            return True
+    return False
+
+
 def index_repo_paths(
     indexer: BaseCodeIndexer,
-    paths: List[str],
+    paths: list,
     recursive: bool = True,
-    include_globs: List[str] = None,
-    exclude_globs: List[str] = None
-) -> Dict[str,int]:
+    include_globs: list = None,
+    exclude_globs: list = None
+) -> dict:
+    import logging
+    logger = logging.getLogger(__name__)
+
     include = include_globs or DEFAULT_INCLUDE
     exclude = set(exclude_globs or DEFAULT_EXCLUDE)
     files_indexed = 0
@@ -228,22 +364,45 @@ def index_repo_paths(
         pth = Path(p)
         if not pth.is_absolute():
             pth = (indexer.repo_root / pth).resolve()
+
+        # Caminho relativo para comparação com glob patterns
+        try:
+            rel_path = pth.relative_to(indexer.repo_root)
+        except ValueError:
+            rel_path = pth
+
+        logger.debug(f"[index_repo_paths] Verificando arquivo: {pth} (relativo: {rel_path})")
+
         if pth.is_file():
-            if any(pth.match(gl) for gl in include) and not any(pth.match(gl) for gl in exclude):
+            if any(fnmatch.fnmatch(str(rel_path), gl) for gl in include) and not is_excluded(rel_path, exclude):
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"[index_repo_paths] Indexando arquivo: {pth}")
                 c, _ = indexer._index_file(pth)
+                # Invalida estado BM25 para recalculo posterior
+                if hasattr(indexer, "_bm25_ready"):
+                    indexer._bm25_ready = False
                 files_indexed += 1 if c > 0 else 0
                 total_chunks += c
         elif pth.is_dir():
             base = pth
-            # Atenção: rglob/glob invertidos — para recursivo usar rglob
             for gl in include:
                 iter_paths = base.rglob(gl) if recursive else base.glob(gl)
                 for fp in iter_paths:
-                    if any(fp.match(eg) for eg in exclude):
+                    try:
+                        rel_fp = fp.relative_to(indexer.repo_root)
+                    except ValueError:
+                        rel_fp = fp
+                    if is_excluded(rel_fp, exclude):
+                        logger.debug(f"[index_repo_paths] Arquivo excluído: {fp}")
                         continue
                     if not fp.is_file():
                         continue
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"[index_repo_paths] Indexando arquivo: {fp}")
                     c, _ = indexer._index_file(fp)
+                    # Invalida estado BM25 para recalculo posterior
+                    if hasattr(indexer, "_bm25_ready"):
+                        indexer._bm25_ready = False
                     files_indexed += 1 if c > 0 else 0
                     total_chunks += c
         else:
@@ -253,111 +412,105 @@ def index_repo_paths(
     indexer._save()
     return {"files_indexed": files_indexed, "chunks": total_chunks}
 
-# ========== FUNÇÕES DE BUSCA BM25 ==========
+def _tokenize_for_bm25(text: str) -> List[str]:
+    return [t.lower() for t in re.findall(r"[A-Za-z0-9_]+", text or "")]
 
-def _bm25_scores(indexer: BaseCodeIndexer, query_tokens: List[str], k1: float = 1.5, b: float = 0.75) -> Dict[str, float]:
-    N = max(1, len(indexer.chunks))
-    avgdl = max(1, sum(indexer.doc_len.values()) / len(indexer.doc_len)) if indexer.doc_len else 1
-    scores: Dict[str, float] = {}
+def _ensure_chunks(indexer) -> List[Dict]:
+    chunks = getattr(indexer, "chunks", None)
+    if chunks is None or not chunks:
+        try:
+            if hasattr(indexer, "load_index"):
+                indexer.load_index()
+            chunks = getattr(indexer, "chunks", []) or []
+        except Exception:
+            chunks = []
+        indexer.chunks = chunks
+    return chunks
 
-    # df / idf
-    unique_q = set(query_tokens)
-    df = {t: len(indexer.inverted.get(t, {})) for t in unique_q}
-    idf = {t: math.log((N - df.get(t, 0) + 0.5) / (df.get(t, 0) + 0.5) + 1) for t in unique_q}
+def _ensure_bm25_state(indexer):
+    if getattr(indexer, "_bm25_ready", False) and getattr(indexer, "chunks", None):
+        return
+    chunks = _ensure_chunks(indexer)
+    doc_len = {}
+    for ch in chunks:
+        cid = ch.get("chunk_id") or ch.get("id") or id(ch)
+        text = ch.get("text") or ch.get("content") or ch.get("content_snippet") or ""
+        toks = _tokenize_for_bm25(text)
+        doc_len[cid] = max(1, len(toks))
 
-    for t in query_tokens:
-        postings = indexer.inverted.get(t, {})
-        for cid, tf in postings.items():
-            dl = indexer.doc_len.get(cid, 1)
-            denom = tf + k1 * (1 - b + b * (dl / avgdl))
-            s = idf[t] * (tf * (k1 + 1)) / denom
-            scores[cid] = scores.get(cid, 0.0) + s
+    N = len(chunks)
+    avgdl = (sum(doc_len.values()) / N) if N > 0 else 1.0
+
+    term_df = {}
+    for ch in chunks:
+        text = ch.get("text") or ch.get("content") or ch.get("content_snippet") or ""
+        uniq = set(_tokenize_for_bm25(text))
+        for t in uniq:
+            term_df[t] = term_df.get(t, 0) + 1
+
+    idf = {}
+    for t, df in term_df.items():
+        idf[t] = math.log(1 + (N - df + 0.5) / (df + 0.5)) if N > 0 else 0.0
+
+    indexer.doc_len = doc_len
+    indexer.avgdl = avgdl
+    indexer.N = N
+    indexer.idf = idf
+    indexer._bm25_ready = True
+
+def _bm25_scores(indexer, q_tokens, k1=1.5, b=0.75) -> List[Tuple[str, float]]:
+    _ensure_bm25_state(indexer)
+    chunks = _ensure_chunks(indexer)
+    N = max(1, getattr(indexer, "N", len(chunks)))
+    avgdl = getattr(indexer, "avgdl", 1.0) or 1.0
+    idf = getattr(indexer, "idf", {})
+    q_terms = [t.lower() for t in q_tokens or []]
+    scores: List[Tuple[str, float]] = []
+
+    for ch in chunks:
+        cid = ch.get("chunk_id") or ch.get("id") or id(ch)
+        text = ch.get("text") or ch.get("content") or ch.get("content_snippet") or ""
+        doc_tokens = _tokenize_for_bm25(text)
+        dl = indexer.doc_len.get(cid, max(1, len(doc_tokens)))
+        tf_counts = Counter(doc_tokens)
+        score = 0.0
+        for qt in q_terms:
+            f = tf_counts.get(qt, 0)
+            if f == 0:
+                continue
+            idf_val = idf.get(qt, 0.0)
+            denom = f + k1 * (1 - b + b * (dl / avgdl))
+            score += idf_val * ((f * (k1 + 1)) / denom)
+        scores.append((cid, score))
+
     return scores
 
-def _recency_boost(indexer: BaseCodeIndexer, cids: List[str], half_life_days: float = 30.0) -> Dict[str, float]:
-    now = now_ts()
-    boosts = {}
-    for cid in cids:
-        c = indexer.chunks.get(cid)
-        if not c:
-            continue
-        age_days = max(0.0, (now - float(c.get("mtime", now))) / 86400.0)
-        # meia-vida: 30 dias => score cai pela metade a cada 30 dias
-        boosts[cid] = 0.5 ** (age_days / half_life_days)
-    return boosts
-
-def _normalize(scores: Dict[str, float]) -> Dict[str, float]:
-    if not scores:
-        return {}
-    mx = max(scores.values())
-    if mx <= 0:
-        return {k: 0.0 for k in scores}
-    return {k: v / mx for k, v in scores.items()}
-
-def _similarity(a_tokens: List[str], b_tokens: List[str]) -> float:
-    if not a_tokens or not b_tokens:
-        return 0.0
-    sa, sb = set(a_tokens), set(b_tokens)
-    inter = len(sa & sb)
-    uni = len(sa | sb)
-    return inter / max(1, uni)
-
-def _mmr_select(indexer: BaseCodeIndexer, candidates: List[str], query_tokens: List[str], k: int = 10, lambda_diverse: float = 0.7) -> List[str]:
-    selected: List[str] = []
-    candidates = list(candidates)
-    while candidates and len(selected) < k:
-        best_cid = None
-        best_score = -1e9
-        for cid in list(candidates):
-            rel = _similarity(query_tokens, indexer.chunks[cid]["terms"])
-            if not selected:
-                div = 0.0
-            else:
-                div = max(_similarity(indexer.chunks[cid]["terms"], indexer.chunks[sc]["terms"]) for sc in selected)
-            mmr = lambda_diverse * rel - (1 - lambda_diverse) * div
-            if mmr > best_score:
-                best_score = mmr
-                best_cid = cid
-        if best_cid is None:
-            break
-        selected.append(best_cid)
-        candidates.remove(best_cid)
-    return selected
-
-def search_code(indexer: BaseCodeIndexer, query: str, top_k: int = 30, filters: Optional[Dict] = None) -> List[Dict]:
-    q_tokens = tokenize(query)
-    if not q_tokens:
-        return []
-
+def search_code(indexer, query, limit=50):
+    q_tokens = _tokenize_for_bm25(query)
+    _ensure_bm25_state(indexer)
     bm25 = _bm25_scores(indexer, q_tokens)
-    if not bm25:
-        return []
 
-    bm25_norm = _normalize(bm25)
-    rec = _recency_boost(indexer, list(bm25.keys()))
-    rec_norm = _normalize(rec)
+    cid_to_chunk = {}
+    for ch in _ensure_chunks(indexer):
+        cid = ch.get("chunk_id") or ch.get("id") or id(ch)
+        cid_to_chunk[cid] = ch
 
-    # combinação simples (80–90% lexical, 10–20% recency)
-    combined = {cid: 0.85 * bm25_norm.get(cid, 0.0) + 0.15 * rec_norm.get(cid, 0.0) for cid in bm25}
-
-    # pega mais candidatos primeiro, depois diversifica
-    ranked = sorted(combined.items(), key=lambda kv: kv[1], reverse=True)[:max(1, top_k * 3)]
-    candidate_ids = [cid for cid, _ in ranked]
-
-    selected = _mmr_select(indexer, candidate_ids, q_tokens, k=min(top_k, len(candidate_ids)), lambda_diverse=0.7)
+    bm25.sort(key=lambda x: x[1], reverse=True)
 
     results = []
-    for cid in selected:
-        c = indexer.chunks[cid]
-        preview = c["content"].splitlines()[:12]
-        results.append({
-            "chunk_id": cid,
-            "file_path": c["file_path"],
-            "start_line": c["start_line"],
-            "end_line": c["end_line"],
-            "score": combined.get(cid, 0.0),
-            "preview": "\n".join(preview),
-        })
+    for cid, sc in bm25[:limit]:
+        ch = cid_to_chunk.get(cid)
+        if ch:
+            preview_lines = ch.get("content", "").splitlines()[:12]
+            results.append({
+                "chunk_id": cid,
+                "file_path": ch.get("file_path", ""),
+                "start_line": ch.get("start_line", 0),
+                "end_line": ch.get("end_line", 0),
+                "score": sc,
+                "preview": "\n".join(preview_lines)
+            })
+
     return results
 
 # ========== FUNÇÕES DE CONTEXTO ==========
@@ -388,11 +541,166 @@ def _summarize_chunk(c: Dict, query_tokens: List[str], max_lines: int = 18) -> s
     summary = header + "\n" + "\n".join(picked)
     return summary
 
+import math
+from typing import Callable, List, Tuple, Dict
+
+def _l2norm(v: List[float]) -> List[float]:
+    s = math.sqrt(sum(x*x for x in v)) or 1.0
+    return [x/s for x in v]
+
+def _cos_sim(a: List[float], b: List[float]) -> float:
+    # a e b normalizados
+    return sum(x*y for x,y in zip(a,b))
+
+def _get_chunk_text(ch: Dict) -> str:
+    return ch.get("text") or ch.get("content") or ch.get("content_snippet") or ch.get("summary") or ch.get("header") or ""
+
+def _embed_chunk(embed_fn: Callable[[str], List[float]], ch: Dict) -> Optional[List[float]]:
+    txt = _get_chunk_text(ch)
+    try:
+        emb = embed_fn(txt) if embed_fn else None
+    except Exception:
+        emb = None
+    return _l2norm(emb) if emb else None
+
+def _mmr_select(
+    indexer_or_scored: object,
+    ordered_ids_or_scored: List[str],
+    query_tokens_or_none: Optional[List[str]] = None,
+    k: int = 10,
+    lambda_diverse: float = 0.7,
+) -> List[str]:
+    """
+    Seleção MMR para diversidade estável com fallback
+
+    Pode ser chamado de duas formas:
+    1) (_mmr_select(scored, cid_to_chunk, embed_fn, k, lambda))
+       - scored: lista de (chunk_id, score) - lista de tuplas
+       - cid_to_chunk: dict {chunk_id: chunk_data}
+       - embed_fn: função embed(texto) opcional (None para fallback)
+    2) (_mmr_select(indexer, ordered_ids, query_tokens, k, lambda))
+       - indexer: EnhancedCodeIndexer ou BaseCodeIndexer com índice carregado
+       - ordered_ids: lista de chunk_ids ordenados por relevância (ex: BM25)
+       - query_tokens: tokens da consulta para gerar embedding
+    """
+    # Detectar o modo (simplificado): se primeiro argumento for objeto com attribute chunks -> modo 2
+    # modo 2: indexer, ordered_ids, query_tokens
+    if hasattr(indexer_or_scored, 'chunks'):
+        indexer = indexer_or_scored
+        ordered_ids = ordered_ids_or_scored
+        q_tokens = query_tokens_or_none or []
+        scored_list = []
+        cid_to_chunk = {}
+        for cid in ordered_ids:
+            ch = None
+            if hasattr(indexer, "chunks"):
+                # indexer.chunks pode ser list ou dict
+                chunks = getattr(indexer, "chunks")
+                if isinstance(chunks, dict):
+                    ch = chunks.get(cid)
+                elif isinstance(chunks, list):
+                    ch = next((c for c in chunks if c.get("chunk_id") == cid), None)
+            if not ch:
+                continue
+            cid_to_chunk[cid] = ch
+            # Usar BM25 score inicial (default 1.0)
+            scored_list.append((cid, 1.0))
+        # Função para extrair embedding
+        if hasattr(indexer, "semantic_engine") and getattr(indexer, "semantic_engine", None):
+            embed_fn = getattr(indexer.semantic_engine, "embed_text", None)
+        else:
+            embed_fn = None
+        scored = scored_list
+    else:
+        scored = indexer_or_scored
+        cid_to_chunk = ordered_ids_or_scored
+        embed_fn = None
+        q_tokens = query_tokens_or_none or []
+
+    if not scored:
+        return []
+
+    actual_k = max(1, min(k, len(scored)))
+
+    # Tentar pré-calcular embeddings
+    embs = {}
+    use_embeddings = embed_fn is not None
+    if use_embeddings:
+        for cid, _ in scored:
+            ch = cid_to_chunk.get(cid)
+            if not ch:
+                continue
+            e = _embed_chunk(embed_fn, ch)
+            if e:
+                embs[cid] = e
+            else:
+                use_embeddings = False
+                break
+
+    # Fallback: Jaccard por tokens se não tem embeddings
+    def _tokset(cid: str) -> set:
+        import re
+        ch = cid_to_chunk.get(cid) or {}
+        s = _get_chunk_text(ch)
+        return set(t.lower() for t in re.findall(r"[A-Za-z0-9_]+", s))
+
+    selected: List[str] = []
+    candidate_ids = [cid for cid, _ in scored]
+
+    # pega top-1 por relevância diretamente
+    selected.append(candidate_ids[0])
+
+    while len(selected) < actual_k and candidate_ids:
+        best_cid = None
+        best_score = float("-inf")
+
+        for cid in candidate_ids:
+            if cid in selected:
+                continue
+            rel = next((s for (c, s) in scored if c == cid), 0.0)
+
+            if use_embeddings:
+                cand = embs.get(cid)
+                if not cand:
+                    div = 1.0
+                else:
+                    max_sim = 0.0
+                    for sid in selected:
+                        sv = embs.get(sid)
+                        if sv:
+                            sim = _cos_sim(cand, sv)
+                            if sim > max_sim:
+                                max_sim = sim
+                    div = 1.0 - max_sim
+            else:
+                # diversidade via Jaccard
+                cand_set = _tokset(cid)
+                max_j = 0.0
+                for sid in selected:
+                    sset = _tokset(sid)
+                    inter = len(cand_set & sset)
+                    union = len(cand_set | sset) or 1
+                    j = inter / union
+                    if j > max_j:
+                        max_j = j
+                div = 1.0 - max_j
+
+            mmr_score = lambda_diverse * rel + (1.0 - lambda_diverse) * div
+            if mmr_score > best_score:
+                best_score = mmr_score
+                best_cid = cid
+
+        if best_cid is None:
+            break
+        selected.append(best_cid)
+
+    return selected[:actual_k]
+
 def build_context_pack(
     indexer: BaseCodeIndexer,
     query: str,
-    budget_tokens: int = 2000,  # Reduzido de 3000 para 2000
-    max_chunks: int = 5,        # Reduzido de 10 para 5
+    budget_tokens: int = 3000,
+    max_chunks: int = 10,
     strategy: str = "mmr"
 ) -> Dict:
     """
@@ -414,74 +722,108 @@ def build_context_pack(
     t0 = time.perf_counter()  # <-- start para medir latência
 
     q_tokens = tokenize(query)
-    search_res = search_code(indexer, query, top_k=max_chunks * 3)
-    ordered_ids = [r["chunk_id"] for r in search_res]
+    search_res = search_code(indexer, query, limit=max_chunks * 3)
+    # supondo que você já tem: bm25 = [(cid, score), ...] ordenado desc
+    bm25 = [(r["chunk_id"], r.get("score", 1.0)) for r in search_res]
+    all_chunks = []
+    if hasattr(indexer, "chunks"):
+        if isinstance(indexer.chunks, dict):
+            all_chunks = list(indexer.chunks.values())
+        else:
+            all_chunks = indexer.chunks
 
-    if strategy == "mmr":
+    cid_to_chunk = { ch["chunk_id"]: ch for ch in all_chunks if "chunk_id" in ch }
+    embed_fn = None
+    if hasattr(indexer, "semantic_engine") and indexer.semantic_engine and hasattr(indexer.semantic_engine, "embed_text"):
+        embed_fn = indexer.semantic_engine.embed_text
+
+    ordered_ids = None
+    try:
         ordered_ids = _mmr_select(
-            indexer,
-            ordered_ids,
-            q_tokens,
-            k=min(max_chunks, len(ordered_ids)),
-            lambda_diverse=0.7,
+            scored=bm25,
+            cid_to_chunk=cid_to_chunk,
+            embed_fn=embed_fn,
+            k=max_chunks,
+            lambda_diverse=0.7
         )
-    else:
-        ordered_ids = ordered_ids[:max_chunks]
+    except Exception:
+        # fallback para top-k puro
+        ordered_ids = [cid for cid, _ in bm25[:max_chunks]]
+
+    if not ordered_ids:
+        ordered_ids = [cid for cid, _ in bm25[:max_chunks]]
 
     pack = {"query": query, "total_tokens": 0, "chunks": []}
     remaining = max(1, budget_tokens)
 
-    # Limite máximo por chunk para evitar consumo excessivo
-    MAX_TOKENS_PER_CHUNK = min(400, budget_tokens // max(1, max_chunks))
+    total_tokens_sent = 0
+    tokens_saved_total = 0
+    cache_tokens_saved = 0
+    compression_tokens_saved = 0
 
     for cid in ordered_ids:
-        c = indexer.chunks[cid]
-        header = f"{c['file_path']}:{c['start_line']}-{c['end_line']}"
-        summary = _summarize_chunk(c, q_tokens, max_lines=12)  # Reduzido de 18 para 12
-
-        # snippet inicial = summary (já inclui header + linhas relevantes)
-        snippet = summary
-        est = est_tokens(snippet)
-
-        # Aplicar limite máximo por chunk
-        if est > MAX_TOKENS_PER_CHUNK:
-            # Poda mais agressiva - corta para caber no limite
-            target_chars = MAX_TOKENS_PER_CHUNK * 3  # ~3 chars por token
-            if len(snippet) > target_chars:
-                snippet = snippet[:target_chars] + "..."
-                est = est_tokens(snippet)
-
-        # se não cabe e já temos algo no pack, tenta o próximo
-        if est > remaining and pack["chunks"]:
+        c = cid_to_chunk.get(cid)
+        if not c:
+            # fallback para chunks não encontrados
+            if hasattr(indexer.chunks, "get"):
+                c = indexer.chunks.get(cid)
+            else:
+                c = next((item for item in indexer.chunks if item.get("chunk_id") == cid), None)
+        if not c:
             continue
 
-        # tentativa de poda adicional para caber no orçamento restante
-        while est > remaining and "\n" in snippet and len(snippet) > 50:
-            lines = snippet.splitlines()
-            # Poda mais agressiva - remove 5 linhas por vez
-            snippet = "\n".join(lines[:-5]) if len(lines) > 5 else lines[0]
-            est = est_tokens(snippet)
-            if len(snippet) < 50:
-                break
+        header = f"{c['file_path']}:{c['start_line']}-{c['end_line']}"
+        summary = _summarize_chunk(c, q_tokens, max_lines=18)
+
+        raw_text = c.get('content', '')
+        tokens_raw = est_tokens(raw_text)
+
+        snippet = summary
+        tokens_sent = est_tokens(snippet)
+
+        from_cache = c.get('from_cache', False)
+        if from_cache:
+            tokens_sent = 0  # ou custo mínimo do placeholder
+
+        tokens_saved = max(0, tokens_raw - tokens_sent)
 
         pack["chunks"].append({
             "chunk_id": cid,
             "header": header,
             "summary": summary,
             "content_snippet": snippet,
-            "estimated_tokens": est,  # Adicionar estimativa para debug
+            "tokens_raw": tokens_raw,
+            "estimated_tokens": tokens_sent,
+            "tokens_saved": tokens_saved,
+            "from_cache": from_cache,
         })
-        pack["total_tokens"] += est
-        remaining = max(0, remaining - est)
 
-        if len(pack["chunks"]) >= max_chunks or remaining <= 50:  # Parar se restam poucos tokens
+        total_tokens_sent += tokens_sent
+        tokens_saved_total += tokens_saved
+        if from_cache:
+            cache_tokens_saved += tokens_saved
+        else:
+            compression_tokens_saved += tokens_saved
+
+        pack["total_tokens"] = total_tokens_sent
+        remaining = max(0, remaining - tokens_sent)
+
+        if len(pack["chunks"]) >= max_chunks or remaining <= 0:
             break
+
+    pack["total_tokens_sent"] = total_tokens_sent
+    pack["tokens_saved_total"] = tokens_saved_total
+    pack["cache_tokens_saved"] = cache_tokens_saved
+    pack["compression_tokens_saved"] = compression_tokens_saved
+
+    if total_tokens_sent == 0 and pack["chunks"]:
+        pack["total_tokens_sent"] = 1  # garantir > 0
 
     # --- LOG MÉTRICAS CSV ---
     try:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         _log_metrics({
-            "ts": dt.datetime.utcnow().isoformat(timespec="seconds"),
+            "ts": utc_timestamp(),
             "query": query[:160],
             "chunk_count": len(pack["chunks"]),
             "total_tokens": pack["total_tokens"],
@@ -505,35 +847,46 @@ class EnhancedCodeIndexer:
     - Auto-indexação com file watcher
     - Cache inteligente
     """
-    
-    def __init__(self, 
-                 index_dir: str = ".mcp_index", 
+
+    def __init__(self,
+                 index_dir: str = ".mcp_index",
                  repo_root: str = ".",
                  enable_semantic: bool = True,
                  enable_auto_indexing: bool = True,
                  semantic_weight: float = 0.3):
-        
+
         # Inicializa indexador base
         self.base_indexer = BaseCodeIndexer(index_dir=index_dir, repo_root=repo_root)
-        
+
         # Configurações
         self.index_dir = Path(index_dir)
         self.repo_root = Path(repo_root)
         self.enable_semantic = enable_semantic and HAS_ENHANCED_FEATURES
         self.enable_auto_indexing = enable_auto_indexing and HAS_ENHANCED_FEATURES
         self.semantic_weight = semantic_weight
-        
+
         # Inicializa componentes opcionais
         self.semantic_engine = None
         self.file_watcher = None
-        
+
+        # Inicializar chunks e estado BM25
+        self.chunks: List[Dict] = getattr(self, "chunks", [])
+        self.doc_len: Dict[str, int] = getattr(self, "doc_len", {})
+        self.avgdl: float = getattr(self, "avgdl", 1.0)
+        self.N: int = getattr(self, "N", 0)
+        self.idf: Dict[str, float] = getattr(self, "idf", {})
+        self._bm25_ready: bool = getattr(self, "_bm25_ready", False)
+
+        # Flag de carregamento do índice
+        self._index_loaded = False
+
         if self.enable_semantic:
             try:
                 self.semantic_engine = SemanticSearchEngine(cache_dir=str(self.index_dir))
                 # Mensagem será enviada pelo mcp_server_enhanced.py
             except Exception as e:
-                import sys
-                sys.stderr.write(f"⚠️  Erro ao inicializar busca semântica: {e}\n")
+                import logging
+                logging.getLogger(__name__).info(f"⚠️  Erro ao inicializar busca semântica: {e}")
                 self.enable_semantic = False
 
         if self.enable_auto_indexing:
@@ -545,12 +898,79 @@ class EnhancedCodeIndexer:
                 )
                 # Mensagem será enviada pelo mcp_server_enhanced.py
             except Exception as e:
-                import sys
-                sys.stderr.write(f"⚠️  Erro ao inicializar auto-indexação: {e}\n")
+                import logging
+                logging.getLogger(__name__).info(f"⚠️  Erro ao inicializar auto-indexação: {e}")
                 self.enable_auto_indexing = False
 
         # Lock para thread safety
         self._lock = threading.RLock()
+
+    def total_files(self) -> int:
+        try:
+            base_chunks = getattr(self.base_indexer, "chunks", {})
+            if isinstance(base_chunks, dict):
+                files = set()
+                for c in base_chunks.values():
+                    fp = c.get("file_path")
+                    if fp:
+                        files.add(fp)
+                return len(files)
+            elif isinstance(base_chunks, list):
+                files = set()
+                for c in base_chunks:
+                    fp = c.get("file_path")
+                    if fp:
+                        files.add(fp)
+                return len(files)
+            else:
+                return 0
+        except Exception:
+            return 0
+
+    def total_chunks(self) -> int:
+        try:
+            base_chunks = getattr(self.base_indexer, "chunks", {})
+            if isinstance(base_chunks, dict):
+                return len(base_chunks)
+            elif isinstance(base_chunks, list):
+                return len(base_chunks)
+            else:
+                return 0
+        except Exception:
+            return 0
+
+    def index_size_bytes(self) -> int:
+        import os
+        try:
+            paths = []
+            if hasattr(self, "index_dir"):
+                d = getattr(self, "index_dir")
+                if d and os.path.isdir(d):
+                    for root, _, files in os.walk(d):
+                        for f in files:
+                            paths.append(os.path.join(root, f))
+            return sum(os.path.getsize(p) for p in paths)
+        except Exception:
+            return 0
+
+    def last_updated_iso(self) -> str:
+        import datetime as dt
+        try:
+            # Try to get last_updated from base_indexer if possible
+            if hasattr(self.base_indexer, "last_updated") and self.base_indexer.last_updated:
+                # Attempt to parse ISO8601 string to datetime and reformat
+                last_updated = self.base_indexer.last_updated
+                try:
+                    dt_obj = dt.datetime.fromisoformat(last_updated)
+                    return dt_obj.isoformat(timespec="seconds")
+                except Exception:
+                    return last_updated
+            ts = getattr(self, "_last_updated_ts", None)
+            if isinstance(ts, (int, float)):
+                return dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).isoformat(timespec="seconds")
+            return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        except Exception:
+            return ""
 
     def _auto_index_callback(self, changed_files: List[Path]) -> Dict[str, Any]:
         """Callback para reindexação automática de arquivos modificados"""
@@ -564,14 +984,27 @@ class EnhancedCodeIndexer:
 
                 # Mensagens de debug via stderr para não interferir com protocolo MCP
                 import sys
-                sys.stderr.write(f"🔄 Auto-reindexação: {result.get('files_indexed', 0)} arquivos, {result.get('chunks', 0)} chunks\n")
+                try:
+                    files = int(result.get('files_indexed', 0)) if isinstance(result, dict) else 0
+                    chunks = int(result.get('chunks', 0)) if isinstance(result, dict) else 0
+                except Exception:
+                    files, chunks = 0, 0
+                # Só loga quando houver mudanças para evitar warnings ruidosos
+                if files > 0 or chunks > 0:
+                    sys.stderr.write(f"🔄 Auto-reindexação: {files} arquivos, {chunks} chunks\n")
 
                 return result
 
             except Exception as e:
-                import sys
-                sys.stderr.write(f"❌ Erro na auto-indexação: {e}\n")
+                import logging
+                logging.getLogger(__name__).info(f"❌ Erro na auto-indexação: {e}")
                 return {"files_indexed": 0, "chunks": 0, "error": str(e)}
+
+    def is_auto_indexing_running(self) -> bool:
+        """Verifica se o auto-indexing está em execução"""
+        if hasattr(self, 'file_watcher'):
+            return self.file_watcher is not None
+        return False
 
     def index_files(self,
                    paths: List[str],
@@ -581,80 +1014,124 @@ class EnhancedCodeIndexer:
                    show_progress: bool = True) -> Dict[str, Any]:
         """
         Indexa arquivos usando o indexador base
-        
+
         Args:
             paths: Lista de caminhos para indexar
             recursive: Se deve indexar recursivamente
             include_globs: Padrões de arquivos para incluir
             exclude_globs: Padrões de arquivos para excluir
             show_progress: Se deve mostrar progresso
-            
+
         Returns:
             Dicionário com estatísticas da indexação
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug("[index_files] Tentando adquirir lock para indexar arquivos...")
         with self._lock:
+            logger.debug("[index_files] Lock adquirido. Iniciando indexação...")
             try:
                 if show_progress:
-                    import sys
-                    sys.stderr.write(f"📁 Indexando {len(paths)} caminhos...\n")
-                
+                    logger.info(f"📁 Indexando {len(paths)} caminhos...")
+
+                # Aplica padrão DEFAULT_EXCLUDE se exclude_globs for None ou lista vazia
+                effective_exclude = exclude_globs if exclude_globs else DEFAULT_EXCLUDE
+
                 # Usa função de indexação base
                 result = index_repo_paths(
                     self.base_indexer,
                     paths=paths,
                     recursive=recursive,
                     include_globs=include_globs,
-                    exclude_globs=exclude_globs
+                    exclude_globs=effective_exclude
                 )
-                
+
                 if show_progress:
-                    import sys
-                    sys.stderr.write(f"✅ Indexação concluída: {result.get('files_indexed', 0)} arquivos, {result.get('chunks', 0)} chunks\n")
-                
+                    logger.info(f"✅ Indexação concluída: {result.get('files_indexed', 0)} arquivos, {result.get('chunks', 0)} chunks")
+
+                # Sincronizar self.chunks com base_indexer.chunks
+                try:
+                    base_chunks = getattr(self.base_indexer, "chunks", {})
+                    if isinstance(base_chunks, dict):
+                        self.chunks = list(base_chunks.values())
+                    elif isinstance(base_chunks, list):
+                        self.chunks = base_chunks
+                    else:
+                        self.chunks = []
+                    self._index_loaded = True
+                except Exception:
+                    pass
+
                 return result
-                
+
             except Exception as e:
-                import sys
-                sys.stderr.write(f"❌ Erro na indexação: {e}\n")
+                logger.info(f"❌ Erro na indexação: {e}")
                 return {"files_indexed": 0, "chunks": 0, "error": str(e)}
-    
-    def search_code(self, 
-                   query: str, 
-                   top_k: int = 30, 
+
+    def load_index(self):
+        """Carrega o índice e atualiza self.chunks"""
+        try:
+            base_chunks = getattr(self.base_indexer, "chunks", {})
+            if isinstance(base_chunks, dict):
+                self.chunks = list(base_chunks.values())
+            elif isinstance(base_chunks, list):
+                self.chunks = base_chunks
+            else:
+                self.chunks = []
+            self._index_loaded = True
+        except Exception:
+            self.chunks = []
+            self._index_loaded = False
+
+    def get_all_chunks(self) -> List[Dict]:
+        """Retorna todos os chunks carregados, carregando se necessário"""
+        if not getattr(self, "_index_loaded", False):
+            try:
+                self.load_index()
+            except Exception:
+                self.chunks = []
+        return self.chunks or []
+
+    def search_code(self,
+                   query: str,
+                   limit: int = 30,
                    use_semantic: Optional[bool] = None,
                    semantic_weight: Optional[float] = None,
                    use_mmr: bool = True,
                    filters: Optional[Dict] = None) -> List[Dict]:
         """
         Busca híbrida combinando BM25 e busca semântica
-        
+
         Args:
             query: Consulta de busca
-            top_k: Número máximo de resultados
+            limit: Número máximo de resultados
             use_semantic: Se True, usa busca híbrida. Se None, usa configuração padrão
             semantic_weight: Peso da similaridade semântica (sobrescreve padrão)
+            use_mmr: Se True, usa MMR para diversidade
             filters: Filtros adicionais
-            
+
         Returns:
             Lista de resultados ordenados por relevância
         """
+        # Manter compatibilidade interna convertendo limit para top_k
+        top_k = limit
         # Define se usar busca semântica
         use_semantic = use_semantic if use_semantic is not None else self.enable_semantic
         semantic_weight = semantic_weight if semantic_weight is not None else self.semantic_weight
-        
+
         # Busca BM25 base
         bm25_results = []
         try:
-            # Usa função de busca base integrada
-            bm25_results = search_code(self.base_indexer, query, top_k=top_k * 2, filters=filters)
+            # Busca BM25 expandida (2x mais resultados para seleção MMR)
+            bm25_results = search_code(self.base_indexer, query, limit=limit * 2, filters=filters)
         except Exception as e:
             import sys
             sys.stderr.write(f"❌ Erro na busca BM25: {e}\n")
             return []
-        
+
         # Se busca semântica não habilitada, retorna apenas BM25
         if not use_semantic or not self.semantic_engine:
-            return bm25_results[:top_k]
+            return bm25_results[:limit]
 
         # Busca híbrida
         try:
@@ -663,19 +1140,32 @@ class EnhancedCodeIndexer:
                 bm25_results=bm25_results,
                 chunk_data=self.base_indexer.chunks,
                 semantic_weight=semantic_weight,
-                top_k=top_k,
+                top_k=limit,
                 use_mmr=use_mmr
             )
-            return semantic_results
+        except TypeError as te:
+            if "unexpected keyword argument 'use_mmr'" in str(te):
+                # fallback sem o parâmetro
+                semantic_results = self.semantic_engine.hybrid_search(
+                    query=query,
+                    bm25_results=bm25_results,
+                    chunk_data=self.base_indexer.chunks,
+                    semantic_weight=semantic_weight,
+                    top_k=limit
+                )
+            else:
+                print(f"⚠️ Erro na busca semântica, usando apenas BM25: {te}")
+                return bm25_results
         except Exception as e:
-            import sys
-            sys.stderr.write(f"⚠️  Erro na busca semântica, usando apenas BM25: {e}\n")
-            return bm25_results[:top_k]
+            print(f"⚠️ Erro na busca semântica, usando apenas BM25: {e}")
+            return bm25_results
+
+        return semantic_results
 
     def build_context_pack(self,
                           query: str,
-                          budget_tokens: int = 2000,  # Alinhado com servidor
-                          max_chunks: int = 5,        # Alinhado com servidor
+                          budget_tokens: int = 3000,
+                          limit: int = 10,
                           strategy: str = "mmr",
                           use_semantic: Optional[bool] = None) -> Dict:
         """
@@ -684,7 +1174,7 @@ class EnhancedCodeIndexer:
         Args:
             query: Consulta de busca
             budget_tokens: Orçamento máximo de tokens
-            max_chunks: Número máximo de chunks
+            limit: Número máximo de chunks
             strategy: Estratégia de seleção ("mmr" ou "topk")
             use_semantic: Se usar busca semântica
 
@@ -694,26 +1184,19 @@ class EnhancedCodeIndexer:
         # Busca chunks relevantes
         search_results = self.search_code(
             query=query,
-            top_k=max_chunks * 3,  # Busca mais para melhor seleção
+            limit=limit * 3,  # Busca mais para melhor seleção
             use_semantic=use_semantic
         )
 
         # Usa função de construção de contexto base integrada
         try:
-            # Simula resultado de busca no formato esperado pela função base
-            mock_results = []
-            for result in search_results:
-                mock_results.append({
-                    'chunk_id': result['chunk_id'],
-                    'score': result['score']
-                })
-
-            # Constrói pack usando função base
+            # Removido bloco de mock dos resultados para evitar suposições de tipo
+            # e manter a construção de contexto baseada no indexador base.
             pack = build_context_pack(
                 self.base_indexer,
                 query=query,
                 budget_tokens=budget_tokens,
-                max_chunks=max_chunks,
+                max_chunks=limit,
                 strategy=strategy
             )
 
@@ -725,33 +1208,46 @@ class EnhancedCodeIndexer:
             return pack
 
         except Exception as e:
-            import sys
-            sys.stderr.write(f"❌ Erro ao construir contexto: {e}\n")
+            import logging
+            logging.getLogger(__name__).info(f"❌ Erro ao construir contexto: {e}")
             return {"query": query, "total_tokens": 0, "chunks": [], "error": str(e)}
 
     def get_stats(self) -> Dict[str, Any]:
         """Retorna estatísticas do indexador"""
+        try:
+            index_size_mb = sum(len(json.dumps(c)) for c in self.base_indexer.chunks.values()) / (1024 * 1024)
+        except Exception:
+            index_size_mb = 0.0
+        # Tentar obter last_updated do indexador base, se existir
+        last_updated = getattr(self.base_indexer, "last_updated", None)
         return {
             "total_chunks": len(self.base_indexer.chunks),
             "total_files": len(set(c["file_path"] for c in self.base_indexer.chunks.values())),
-            "index_size_mb": sum(len(json.dumps(c)) for c in self.base_indexer.chunks.values()) / (1024 * 1024),
+            "index_size_mb": round(index_size_mb, 3),
+            "last_updated": last_updated,
             "semantic_enabled": self.enable_semantic,
             "auto_indexing_enabled": self.enable_auto_indexing,
             "has_enhanced_features": HAS_ENHANCED_FEATURES
         }
-    
+
     def start_auto_indexing(self) -> bool:
         """Inicia o file watcher para auto-indexação"""
         if not self.enable_auto_indexing or not self.file_watcher:
             return False
+        # Evita tentar iniciar novamente se já estiver rodando
+        try:
+            if hasattr(self.file_watcher, 'is_running') and self.file_watcher.is_running:
+                return True
+        except Exception:
+            pass
         try:
             self.file_watcher.start()
             return True
         except Exception as e:
-            import sys
-            sys.stderr.write(f"❌ Erro ao iniciar auto-indexação: {e}\n")
+            import logging
+            logging.getLogger(__name__).info(f"❌ Erro ao iniciar auto-indexação: {e}")
             return False
-    
+
     def stop_auto_indexing(self) -> bool:
         """Para o file watcher"""
         if not self.file_watcher:
@@ -760,9 +1256,28 @@ class EnhancedCodeIndexer:
             self.file_watcher.stop()
             return True
         except Exception as e:
-            import sys
-            sys.stderr.write(f"❌ Erro ao parar auto-indexação: {e}\n")
+            import logging
+            logging.getLogger(__name__).info(f"❌ Erro ao parar auto-indexação: {e}")
             return False
+
+    def embed_text(self, text: str):
+        """
+        Retorna vetor de embedding (list[float]) para o texto.
+        Se não houver modelo carregado, retorna None.
+        """
+        fn = None
+        if self.semantic_engine and hasattr(self.semantic_engine, "embed_text"):
+            fn = getattr(self.semantic_engine, "embed_text")
+        elif hasattr(self, "_embed_fn") and callable(getattr(self, "_embed_fn")):
+            fn = getattr(self, "_embed_fn")
+        elif hasattr(self, "embed") and callable(getattr(self, "embed")):
+            fn = getattr(self, "embed")
+        if fn is None:
+            return None
+        try:
+            return fn(text)
+        except Exception:
+            return None
 
 # ========== FUNÇÕES PÚBLICAS PARA COMPATIBILIDADE ==========
 
@@ -775,19 +1290,25 @@ def enhanced_index_repo_paths(
     enable_semantic: bool = True  # Adicionado para compatibilidade com o servidor
 ) -> Dict[str,int]:
     """Wrapper para compatibilidade com API antiga"""
-    # O parâmetro enable_semantic não é usado diretamente na indexação,
-    # mas é mantido para compatibilidade com a API do servidor
-    return indexer.index_files(
+    result = indexer.index_files(
         paths=paths,
         recursive=recursive,
         include_globs=include_globs,
         exclude_globs=exclude_globs
     )
+    # Atualizar contadores após indexação bem-sucedida
+    try:
+        indexer._total_files = result.get("files_indexed", 0)
+        import time
+        indexer._last_updated_ts = time.time()
+    except Exception:
+        pass
+    return result
 
 def enhanced_search_code(
     indexer: EnhancedCodeIndexer,
     query: str,
-    top_k: int = 30,
+    limit: int = 30,
     filters: Optional[Dict] = None,
     semantic_weight: float = None,
     use_mmr: bool = True
@@ -795,22 +1316,7 @@ def enhanced_search_code(
     """Wrapper para compatibilidade com API antiga"""
     # Os parâmetros semantic_weight e use_mmr são mantidos para compatibilidade
     # mas podem não ser usados dependendo da implementação do indexer
-    return indexer.search_code(query=query, top_k=top_k, filters=filters)
-
-def enhanced_build_context_pack(
-    indexer: EnhancedCodeIndexer,
-    query: str,
-    budget_tokens: int = 2000,  # Alinhado com servidor
-    max_chunks: int = 5,        # Alinhado com servidor
-    strategy: str = "mmr"
-) -> Dict:
-    """Wrapper para construir pacote de contexto alinhado com servidor"""
-    return indexer.build_context_pack(
-        query=query,
-        budget_tokens=budget_tokens,
-        max_chunks=max_chunks,
-        strategy=strategy,
-    )
+    return indexer.search_code(query=query, limit=limit, filters=filters, semantic_weight=semantic_weight, use_mmr=use_mmr)
 
 def enhanced_build_context_pack(
     indexer: EnhancedCodeIndexer,
@@ -823,9 +1329,12 @@ def enhanced_build_context_pack(
     return indexer.build_context_pack(
         query=query,
         budget_tokens=budget_tokens,
-        max_chunks=max_chunks,
+        limit=max_chunks,
         strategy=strategy
     )
+
+import logging
+logging.basicConfig(level=logging.INFO)
 
 # Alias para compatibilidade com código existente
 CodeIndexer = BaseCodeIndexer

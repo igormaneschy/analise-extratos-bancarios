@@ -159,7 +159,7 @@ def test_basic_functionality():
     
     try:
         # Testar importação dos módulos principais
-        from code_indexer_enhanced import BaseCodeIndexer
+        from code_indexer_enhanced_bkp import BaseCodeIndexer
         print_step("Importação do indexador básico", "ok")
         
         # Testar criação do indexador

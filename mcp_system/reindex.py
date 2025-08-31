@@ -73,7 +73,7 @@ def main():
 
     # Importa o indexador do seu projeto
     try:
-        from code_indexer_enhanced import CodeIndexer, index_repo_paths  # type: ignore
+        from code_indexer_enhanced_bkp import CodeIndexer, index_repo_paths  # type: ignore
     except Exception as e:
         print("[erro] Não foi possível importar CodeIndexer/index_repo_paths de code_indexer_enhanced.py", file=sys.stderr)
         raise

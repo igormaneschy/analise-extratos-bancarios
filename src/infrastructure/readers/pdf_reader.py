@@ -1,9 +1,9 @@
 """
 Implementação de leitor de extratos em PDF.
 """
-import re
-import json
 import os
+import json
+import re
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
