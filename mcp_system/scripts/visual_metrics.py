@@ -7,7 +7,7 @@ Gerador de gráficos visuais para métricas do MCP (atualizado)
 - Dashboard executivo com médias e economia estimada
 
 Uso:
-  python mcp_system/scripts/visual_metrics.py --file .mcp_index/metrics_context.csv --baseline 15000
+  python mcp_system/scripts/visual_metrics.py --file mcp_system/.mcp_index/metrics_context.csv --baseline 15000
   python -m mcp_system.scripts.visual_metrics --file .mcp_index/metrics_context.csv
 
 Env vars suportadas:
@@ -18,6 +18,8 @@ import os, sys, csv, datetime as dt, statistics as st
 from typing import List, Dict, Any, Optional
 import pathlib
 import argparse
+import json
+import shutil
 
 CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
 ROOT_DIR = CURRENT_DIR.parent
@@ -49,14 +51,23 @@ def create_ascii_chart(data: List[float], title: str, width: int = 50, height: i
     max_val = max(data)
     if max_val == min_val:
         max_val = min_val + 1
+    # Ajustar largura ao terminal se possível
+    try:
+        cols = shutil.get_terminal_size((80, 20)).columns
+        width = min(width, max(20, cols - 20))
+    except Exception:
+        pass
+    # Amostragem para séries longas para caber em width
+    step = max(1, len(data) // max(1, width))
+    data_sampled = data[::step]
     chart_lines = [f"📊 {title}", "─" * (len(title) + 3)]
     for i in range(height, 0, -1):
         threshold = min_val + (max_val - min_val) * i / height
         line = f"{threshold:6.0f} │"
-        for val in data:
+        for val in data_sampled:
             line += "█" if val >= threshold else " "
         chart_lines.append(line)
-    base_line = "       └" + "─" * len(data)
+    base_line = "       └" + "─" * len(data_sampled)
     chart_lines.append(base_line)
     return "\n".join(chart_lines)
 
@@ -71,13 +82,13 @@ def create_comparison_chart(mcp_tokens: float, without_mcp: Optional[float] = No
     chart.append("")
     if without_mcp is None:
         without_mcp = TOKENS_WITHOUT_MCP
-    without_bars = int(without_mcp / 2500)
+    without_bars = max(1, int(without_mcp / 2500))
     chart.append(f"Sem MCP ({without_mcp:,.0f} tokens):")
     chart.append("█" * min(without_bars, 60))
     chart.append("")
-    with_bars = int(mcp_tokens / 2500)
+    with_bars = max(1, int(max(mcp_tokens, 1) / 2500))
     chart.append(f"Com MCP ({mcp_tokens:,.0f} tokens):")
-    chart.append("█" * max(1, with_bars))
+    chart.append("█" * min(with_bars, 60))
     chart.append("")
     savings_pct = ((without_mcp - mcp_tokens) / without_mcp) * 100 if without_mcp else 0
     chart.append(f"💰 Economia: {savings_pct:.1f}%")
@@ -147,8 +158,12 @@ def _read_metrics(metrics_file: Optional[str]) -> List[Dict[str, Any]]:
         reader = csv.DictReader(f)
         for row in reader:
             try:
+                tokens = float(row.get('total_tokens', 0) or 0)
+                if tokens <= 0:
+                    # Fallback para total_tokens_sent quando presente
+                    tokens = float(row.get('total_tokens_sent', tokens) or 0)
                 rows.append({
-                    'tokens': float(row.get('total_tokens', 0) or 0),
+                    'tokens': tokens,
                     'latency': float(row.get('latency_ms', 0) or 0),
                     'utilization': _normalize_utilization(row.get('budget_utilization', 0)),
                     'date': (row.get('ts', '') or '')[:10],
@@ -157,6 +172,49 @@ def _read_metrics(metrics_file: Optional[str]) -> List[Dict[str, Any]]:
             except (ValueError, TypeError):
                 continue
     return rows
+
+# Expor uma função utilitária para testes/integração que retorna objeto estruturado
+def generate_visual_report_structured(metrics_file: Optional[str] = None, baseline_tokens: Optional[float] = None) -> Dict[str, Any]:
+    rows = _read_metrics(metrics_file)
+
+    if not rows:
+        return {"summary": {}, "daily_summary": [], "rows": []}
+
+    if baseline_tokens is None:
+        try:
+            baseline_tokens = float(os.getenv("MCP_BASELINE_TOKENS", "15000"))
+        except ValueError:
+            baseline_tokens = 15000.0
+
+    avg_tokens = st.mean([r['tokens'] for r in rows])
+    avg_latency = st.mean([r['latency'] for r in rows])
+    avg_util = st.mean([r['utilization'] for r in rows])
+
+    daily_data: Dict[str, List[Dict[str, float]]] = {}
+    for row in rows:
+        daily_data.setdefault(row['date'], []).append(row)
+
+    daily_summary = []
+    for date, day_rows in sorted(daily_data.items()):
+        daily_summary.append({
+            'day': date,
+            'avg_tokens': st.mean([r['tokens'] for r in day_rows]),
+            'avg_latency': st.mean([r['latency'] for r in day_rows]),
+        })
+
+    output = {
+        "summary": {
+            "num_queries": len(rows),
+            "avg_tokens": avg_tokens,
+            "avg_latency_ms": avg_latency,
+            "avg_utilization_pct": avg_util,
+            "baseline_tokens": baseline_tokens,
+            "cost_estimated": (avg_tokens / 1000.0) * COST_PER_1K_TOKENS,
+        },
+        "daily_summary": daily_summary,
+        "rows": rows,
+    }
+    return output
 
 
 def generate_visual_report(metrics_file: Optional[str] = None, baseline_tokens: Optional[float] = None):
@@ -206,8 +264,14 @@ def generate_visual_report(metrics_file: Optional[str] = None, baseline_tokens: 
     print(f"   • Tokens médios: {avg_tokens:.0f}")
     if baseline_tokens:
         print(f"   • Economia vs sem MCP: {((baseline_tokens - avg_tokens) / baseline_tokens) * 100:.1f}%")
+        # Custo estimado com e sem MCP
+        cost_mcp = (avg_tokens / 1000.0) * COST_PER_1K_TOKENS
+        cost_base = (baseline_tokens / 1000.0) * COST_PER_1K_TOKENS
+        print(f"   • Custo estimado: ${cost_mcp:.4f} (baseline: ${cost_base:.4f})")
     else:
         print("   • Economia vs sem MCP: N/D (baseline 0)")
+        cost_mcp = (avg_tokens / 1000.0) * COST_PER_1K_TOKENS
+        print(f"   • Custo estimado: ${cost_mcp:.4f}")
     print(f"   • Latência média: {avg_latency:.0f}ms")
     print(f"   • Utilização orçamento: {avg_util:.1f}%")
     print()
@@ -226,9 +290,16 @@ def main():
     parser = argparse.ArgumentParser(description="Gerador de gráficos visuais para métricas MCP (atualizado)")
     parser.add_argument("--file", help="Arquivo CSV de métricas específico")
     parser.add_argument("--baseline", type=float, default=None, help="Baseline de tokens sem MCP (default 15000 ou MCP_BASELINE_TOKENS)")
+    parser.add_argument("--json", action="store_true", help="Saída em JSON estruturado -- útil para pipelines")
     args = parser.parse_args()
-    generate_visual_report(args.file, baseline_tokens=args.baseline)
+    if args.json:
+        import json
+        out = generate_visual_report_structured(args.file, baseline_tokens=args.baseline)
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        generate_visual_report(args.file, baseline_tokens=args.baseline)
 
 
 if __name__ == "__main__":
     main()
+

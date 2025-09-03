@@ -10,7 +10,7 @@ Resumo de métricas do MCP (atualizado para o contexto atual)
 Uso:
   python mcp_system/scripts/summarize_metrics.py                # lê apenas contexto por padrão
   python mcp_system/scripts/summarize_metrics.py --include-index # inclui métricas de indexação (em seção separada)
-  python mcp_system/scripts/summarize_metrics.py --file .mcp_index/metrics_context.csv
+  python mcp_system/scripts/summarize_metrics.py --file mcp_system/.mcp_index/metrics_context.csv
   python mcp_system/scripts/summarize_metrics.py --since 7 --tz utc --json
   python -m mcp_system.scripts.summarize_metrics --since 7 --tz utc --json
 """
@@ -53,8 +53,19 @@ def coerce_float(s, default=0.0):
 def parse_dt(s: str) -> Optional[dt.datetime]:
     if not s:
         return None
-    # Tentar diferentes formatos de data
-    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S.%f"]:
+    # 1) Tente ISO-8601 robusto (suporta timezone com dois-pontos e 'Z')
+    try:
+        return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        pass
+    # 2) Tentar diferentes formatos comuns
+    for fmt in [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S.%f",
+    ]:
         try:
             d = dt.datetime.strptime(s, fmt)
             # Se não tem timezone, assume UTC para consistência
@@ -138,6 +149,13 @@ def load_context_rows(args) -> List[Dict[str, Any]]:
         out = []
         for r in rows:
             r = dict(r)
+            # Fallback para total_tokens_sent quando total_tokens for 0/ausente
+            try:
+                tok = coerce_float(r.get("total_tokens"), 0.0)
+            except Exception:
+                tok = 0.0
+            if tok <= 0 and "total_tokens_sent" in r:
+                r["total_tokens"] = r.get("total_tokens_sent")
             r["budget_utilization"] = _normalize_utilization(r.get("budget_utilization"))
             out.append(r)
         return out
@@ -154,6 +172,13 @@ def load_context_rows(args) -> List[Dict[str, Any]]:
             continue
         for r in rows:
             r = dict(r)
+            # Fallback para total_tokens_sent quando total_tokens for 0/ausente
+            try:
+                tok = coerce_float(r.get("total_tokens"), 0.0)
+            except Exception:
+                tok = 0.0
+            if tok <= 0 and "total_tokens_sent" in r:
+                r["total_tokens"] = r.get("total_tokens_sent")
             r["budget_utilization"] = _normalize_utilization(r.get("budget_utilization"))
             out.append(r)
     return out
@@ -182,14 +207,30 @@ def load_index_rows(args) -> List[Dict[str, Any]]:
 
 
 def filter_rows(rows: List[Dict], since_days: int = 0, query_filter: str = "") -> List[Dict]:
+    # Anotar parsed timestamp para evitar re-parsing repetido
+    parsed_cache = []
+    cutoff = None
     if since_days > 0:
         cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=since_days)
-        rows = [r for r in rows if parse_dt(r.get("ts")) and parse_dt(r.get("ts")) >= cutoff]
+
+    for r in rows:
+        ts = r.get("ts")
+        d = parse_dt(ts)
+        # armazenar para uso posterior em _compute_stats
+        if d:
+            r["_parsed_ts"] = d
+        else:
+            r["_parsed_ts"] = None
+        parsed_cache.append(r)
+
+    out = parsed_cache
+    if cutoff is not None:
+        out = [r for r in out if r.get("_parsed_ts") and r.get("_parsed_ts") >= cutoff]
 
     if query_filter:
-        rows = [r for r in rows if query_filter.lower() in str(r.get("query", "")).lower()]
+        out = [r for r in out if query_filter.lower() in str(r.get("query", "")).lower()]
 
-    return rows
+    return out
 
 
 def format_dt(d: dt.datetime) -> str:
@@ -200,7 +241,8 @@ def _compute_stats(rows: List[Dict], tz_mode: str, ignore_zero_latency: bool) ->
     # Converter timestamps e ordenar
     parsed_rows = []
     for r in rows:
-        d = parse_dt(r.get("ts"))
+        # Reusar timestamp parseado se disponível (setado em filter_rows) para evitar reparsing
+        d = r.get("_parsed_ts") if (r.get("_parsed_ts") is not None) else parse_dt(r.get("ts"))
         if not d:
             continue
         parsed_rows.append((r, d))
@@ -342,7 +384,8 @@ def main():
             if args.include_index:
                 idx_summary, idx_daily = _compute_stats(index_rows, args.tz, args.ignore_zero_latency)
                 output["index"] = {"summary": idx_summary, "daily": idx_daily}
-            print(json.dumps(output, indent=2))
+            # Normalize numeric types for JSON
+            print(json.dumps(output, indent=2, ensure_ascii=False))
             return
 
         # Saída em texto

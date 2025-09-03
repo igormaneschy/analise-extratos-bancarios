@@ -12,9 +12,8 @@ from rich.panel import Panel
 # Adiciona o diretório raiz ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.application.use_cases import ExtractAnalyzer
-from src.domain.exceptions import DomainException
-from src.utils.currency_utils import CurrencyUtils
+# Imports de src removidos do topo e movidos para dentro da função analyze para permitir testes sem src no PYTHONPATH.
+# Serão importados tardiamente dentro do comando analyze.
 
 
 console = Console()
@@ -33,6 +32,11 @@ def cli():
 def analyze(file_path, output, format):
     """Analisa um extrato bancário em PDF, Excel ou CSV."""
     try:
+        # Imports tardios para evitar dependência em tempo de import do módulo
+        from src.application.use_cases import ExtractAnalyzer
+        from src.domain.exceptions import DomainException  # noqa: F401 - usado no except
+        from src.utils.currency_utils import CurrencyUtils
+
         analyzer = ExtractAnalyzer()
 
         # Se especificou formato markdown, troca o gerador
@@ -41,10 +45,10 @@ def analyze(file_path, output, format):
             analyzer.use_case.report_generator = MarkdownReportGenerator()
 
         result, report, statement = analyzer.analyze_file(file_path, output)
-        
+
         # Formata valores com a moeda correta
         currency_symbol = CurrencyUtils.get_currency_symbol(result.currency)
-        
+
         # Mostra resumo no console
         console.print(Panel.fit(
             f"[bold green]✓ Análise concluída![/bold green]\n\n"
@@ -53,7 +57,7 @@ def analyze(file_path, output, format):
             f"💸 Despesas: {currency_symbol}{result.total_expenses:,.2f}\n"
             f"📈 Saldo: {currency_symbol}{result.net_flow:,.2f}"
         ))
-        
+
         # Mostra alertas, se houver
         if result.alerts:
             alert_table = Table(title="⚠️  Alertas", style="yellow")
@@ -61,7 +65,7 @@ def analyze(file_path, output, format):
             for alert in result.alerts:
                 alert_table.add_row(alert)
             console.print(alert_table)
-        
+
         # Mostra insights, se houver
         if result.insights:
             insight_table = Table(title="💡 Insights")
@@ -69,18 +73,23 @@ def analyze(file_path, output, format):
             for insight in result.insights:
                 insight_table.add_row(insight)
             console.print(insight_table)
-        
+
         # Salva ou mostra o relatório completo
         if output:
             console.print(f"[green]Relatório salvo em:[/green] {output}")
         else:
             console.print("\n[bold]Relatório completo:[/bold]\n")
             console.print(report)
-            
-    except DomainException as e:
-        console.print(f"[red]Erro de domínio:[/red] {str(e)}")
-        sys.exit(1)
+
     except Exception as e:
+        # Tenta identificar DomainException para mensagem específica
+        try:
+            from src.domain.exceptions import DomainException  # type: ignore
+            if isinstance(e, DomainException):
+                console.print(f"[red]Erro de domínio:[/red] {str(e)}")
+                sys.exit(1)
+        except Exception:
+            pass
         console.print(f"[red]Erro inesperado:[/red] {str(e)}")
         sys.exit(1)
 

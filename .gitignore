@@ -76,7 +76,6 @@ temp/
 
 # índices e memória gerados em runtime
 # MCP drop-in
-mcp_system/
 mcp_system/.mcp_index/
 mcp_system/.mcp_memory/
 mcp_system/.emb_cache/

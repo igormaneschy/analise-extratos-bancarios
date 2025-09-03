@@ -40,24 +40,37 @@ import csv
 import datetime as dt
 import threading
 
-_tokens_lock = threading.Lock()
-_tokens_sent_total = 0
-_tokens_saved_total = 0
-_cache_tokens_saved_total = 0
-_compression_tokens_saved_total = 0
-_last_query_tokens_sent = 0
-_last_query_tokens_saved = 0
-
+# Token counters are declared later in the handlers section to keep a single
+# source of truth (see the canonical declarations near the handlers and the
+# definitive implementation of _update_metrics_from_pack). This placeholder
+# avoids duplicate declarations when the file is processed in multiple passes.
 
 import logging
+import os
 
-logger = logging.getLogger("mcp_server")
+logger = logging.getLogger("mcp_server_enhanced")
 if not logger.handlers:
     h = logging.StreamHandler()
     h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
     logger.addHandler(h)
 logger.setLevel(os.getenv("MCP_LOG_LEVEL", "INFO").upper())
 logger.propagate = False
+
+# Robust MemoryStore import detection with relative fallback
+try:
+    from mcp_system.memory_store import MemoryStore
+    _HAS_MEMORY = True
+except Exception as e:
+    try:
+        from .memory_store import MemoryStore  # type: ignore
+        _HAS_MEMORY = True
+    except Exception as e2:
+        MemoryStore = None
+        _HAS_MEMORY = False
+        logger.warning("[MemoryStore] desabilitado por import: %s | fallback: %s", repr(e), repr(e2))
+
+# module-level store instance (populated at bootstrap if enabled)
+store = None
 
 
 def set_log_level(level: str = "INFO"):
@@ -68,70 +81,50 @@ def set_log_level(level: str = "INFO"):
     logger.info("Log level alterado para %s", level.upper())
 
 
-def _update_metrics_from_pack(pack: dict):
-    sent  = int(pack.get("total_tokens_sent", 0))
-    saved = int(pack.get("tokens_saved_total", 0))
-    cache_saved = int(pack.get("cache_tokens_saved", 0))
-    compr_saved = int(pack.get("compression_tokens_saved", 0))
-    global _last_query_tokens_sent, _last_query_tokens_saved
-    with _tokens_lock:
-        _last_query_tokens_sent = sent
-        _last_query_tokens_saved = saved
-        globals()["_tokens_sent_total"] += sent
-        globals()["_tokens_saved_total"] += saved
-        globals()["_cache_tokens_saved_total"] += cache_saved
-        globals()["_compression_tokens_saved_total"] += compr_saved
+# Note: the canonical implementation of _update_metrics_from_pack is defined in
+# the handlers section further down (keeps related helpers colocated).
+# Do not create wrappers that reference non-existent symbols; callers will use
+# the single canonical function declared later in the file.
 
 # add subprocess for git fallback and filesystem ops
 import subprocess
 from pathlib import Path
-# memória operacional mínima (opcional)
-_HAS_MEMORY = False
-import logging
-logger = logging.getLogger(__name__)
+# NOTE: Do not override _HAS_MEMORY here — it is intentionally set by the MemoryStore import logic above
 
-try:
-    # Preferir import absoluto para funcionar fora do contexto de pacote
-    from mcp_system.memory_store import MemoryStore  # type: ignore
-    _HAS_MEMORY = True
-    try:
-        logger.debug("[mcp_server_enhanced] 🧠 MemoryStore disponível")
-    except Exception:
-        pass
-except Exception as e_abs:
-    try:
-        # Fallback para import relativo quando executado como pacote
-        from .memory_store import MemoryStore  # type: ignore
-        _HAS_MEMORY = True
-        try:
-            logger.debug("[mcp_server_enhanced] 🧠 MemoryStore disponível (import relativo)")
-        except Exception:
-            pass
-    except Exception as e_rel:
-        MemoryStore = None  # type: ignore
-        _HAS_MEMORY = False
-        try:
-            logger.warning("[mcp_server_enhanced] ⚠️ MemoryStore indisponível: abs=%s; rel=%s", e_abs, e_rel)
-        except Exception:
-            pass
-
-def context_pack(query: str, token_budget: int = 800, max_chunks: int = 8, strategy: str = "mmr"):
-    # `indexer` deve ser a instância global já inicializada nesse módulo
-    pack = build_context_pack(
-        indexer=indexer,
-        query=query,
-        budget_tokens=token_budget,
-        max_chunks=max_chunks,
-        strategy=strategy
-    )
-    _update_metrics_from_pack(pack)
-    return {"status": "success", "data": pack}
+# NOTE: context_pack handler is implemented later as _handle_context_pack and
+# exposed via the mcp.tool() decorated wrapper near the bottom of the file.
+# The simplified inline context_pack implementation was removed to avoid
+# duplicate definitions and ensure all calls go through _handle_context_pack.
 
 from typing import Optional  # for safe Optional annotations
 from pathlib import Path
 
 # Obter o diretório do script atual
 CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
+
+def _safe_record_llm_usage(store, model_name: str, tokens_sent: float, calls: int = 1):
+    """Helper to safely write llm usage into the MemoryStore if available.
+
+    Best-effort: swallow any exceptions to avoid impacting main flow.
+    """
+    try:
+        # If no store provided, try to obtain the module-level memory store helper
+        if store is None:
+            try:
+                store = _get_memory()
+            except Exception:
+                store = None
+        if store is None:
+            return
+        if not hasattr(store, 'record_llm_usage'):
+            return
+        try:
+            store.record_llm_usage(model=model_name, tokens=float(tokens_sent), calls=int(calls))
+        except Exception:
+            # swallow errors
+            return
+    except Exception:
+        return
 
 # Import FastMCP (agora obrigatório)
 try:
@@ -169,21 +162,222 @@ except Exception as e:
     HAS_ENHANCED_FEATURES = False
 
 HAS_CONTEXT_MEMORY = False
+
+# Try to import cache helpers (search/embeddings TTLs). Support different import layouts.
+try:
+    from mcp_system.memory_store import get_cache, TTL_SEARCH_S, TTL_EMB_DAYS
+except Exception:
+    try:
+        from memory_store import get_cache, TTL_SEARCH_S, TTL_EMB_DAYS
+    except Exception:
+        try:
+            from .memory_store import get_cache, TTL_SEARCH_S, TTL_EMB_DAYS
+        except Exception:
+            # Fallback defaults when memory_store is not available
+            get_cache = None
+            TTL_SEARCH_S = 120
+            TTL_EMB_DAYS = 14
+
+try:
+    from mcp_system.code_indexer_enhanced import get_current_index_version
+except Exception:
+    def get_current_index_version():
+        # Dynamic forwarding: attempt to import and delegate at call time to avoid duplication
+        try:
+            from mcp_system.code_indexer_enhanced import get_current_index_version as _g
+            return _g()
+        except Exception:
+            return "unknown"
+
+import os
+from pathlib import Path
+
+# Default DATA_DIR: prefer MCP_DATA_DIR env var, otherwise keep storage package-local under mcp_system/.mcp_memory
+package_dir = Path(__file__).resolve().parent
+DATA_DIR = os.environ.get("MCP_DATA_DIR", str(package_dir / ".mcp_memory"))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+_search_cache = None
+_emb_cache = None
+if callable(globals().get('get_cache')):
+    _search_cache = get_cache("search", persist_path=os.path.join(DATA_DIR, "search_cache.json"), max_size=10000)
+    _emb_cache = get_cache("embeddings", persist_path=os.path.join(DATA_DIR, "emb_cache.json"), max_size=20000)
+
+def _normalize_query(q, opts):
+    qn = " ".join((q or "").split()).lower()
+    opts = opts or {}
+    return {"q": qn, "opts": {k: opts[k] for k in sorted(opts) if opts[k] is not None}}
+
 # === Semantic Rerank Helpers (v4) ===
+import json
+
+# Budget control for LLM context windows
+MODEL_WINDOWS = {"gpt-5-mini": 128000, "gpt-4o": 128000, "gpt-5": 200000}
+MIN_HEADROOM = 2000
+
+def _approx_token_count(t: str) -> int:
+    return (len(t or "") + 3) // 4
+
+
+def estimate_token_budget(model: str, parts: dict) -> dict:
+    win = MODEL_WINDOWS.get(model, 128000)
+    # base is sum of approximate token counts for parts of interest
+    base = 0
+    for k, v in parts.items():
+        if k not in ["system", "rules", "user", "tools"]:
+            continue
+        if isinstance(v, list):
+            for x in v:
+                base += _approx_token_count(str(x))
+        else:
+            base += _approx_token_count(str(v))
+    head = max(int(0.4 * win), MIN_HEADROOM)
+    avail = max(win - head - base, 0)
+    return {"window": win, "tokens_input": base, "headroom": head, "available": avail}
+
+
+def _apply_budget_to_pack(pack: dict, model: str = None) -> dict:
+    """Trunca os content_snippet dos chunks do pack para caber no orçamento estimado.
+    Modifica o pack in-place e adiciona informações de budget em pack['budget_info'].
+    """
+    try:
+        # Prefer explicit model argument, then any existing model already attached to the pack
+        # (e.g. by callers that set pack['budget_info']['model']), and only then fall back to
+        # the environment/default. This prevents silently overwriting a model previously set
+        # by the caller with the hard-coded default "gpt-4o".
+        model = model or (pack.get('budget_info') or {}).get('model') or os.getenv("MCP_DEFAULT_MODEL", "gpt-4o")
+        parts = {
+            "system": os.getenv("PROMPT_SYSTEM", ""),
+            "rules": os.getenv("PROMPT_RULES", ""),
+            "user": pack.get("query", ""),
+            "tools": [c.get("content_snippet", "") for c in pack.get("chunks", [])]
+        }
+        binfo = estimate_token_budget(model, parts)
+        # log initial available before any truncation so we can diagnose decisions
+        available_initial = int(binfo.get("available", 0))
+        available = available_initial
+        # Iterate chunks and truncate content_snippet until available exhausted
+        num_snippets_final = 0
+        for c in pack.get("chunks", []):
+            snip = c.get("content_snippet", "") or ""
+            tok = _approx_token_count(snip)
+            if tok <= available:
+                # keep whole snippet
+                if snip.strip():
+                    num_snippets_final += 1
+                available -= tok
+                continue
+            # need to truncate
+            if available <= 0:
+                # empty out remaining snippets
+                c["content_snippet"] = ""
+                continue
+            # approximate allowed chars
+            allowed_chars = max(0, available * 4 - 3)
+            if allowed_chars <= 0:
+                c["content_snippet"] = ""
+                available = 0
+                continue
+            truncated = snip[:allowed_chars]
+            # try to end at a line boundary if possible
+            if "\n" in truncated:
+                truncated = "\n".join(truncated.splitlines()[:-1])
+            truncated = truncated.rstrip()
+            if truncated:
+                truncated = truncated + "\n...[truncated]"
+                c["content_snippet"] = truncated
+                num_snippets_final += 1
+            else:
+                c["content_snippet"] = ""
+            # consumed all available
+            available = 0
+        # Add budget_info
+        pack["budget_info"] = {
+            "model": model,
+            "window": binfo.get("window"),
+            "tokens_input": binfo.get("tokens_input"),
+            "headroom": binfo.get("headroom"),
+            "available_initial": available_initial,
+            "available_after": available,
+            "num_snippets_final": num_snippets_final,
+        }
+        logger.debug(
+            "[budget] model=%s window=%s tokens_input=%s headroom=%s available_initial=%s available_after=%s num_snippets_final=%s",
+            model,
+            binfo.get("window"),
+            binfo.get("tokens_input"),
+            binfo.get("headroom"),
+            available_initial,
+            available,
+            num_snippets_final,
+        )
+    except Exception as e:
+        logger.debug("[budget] falha ao aplicar budget: %s", e)
+    return pack
 from typing import Optional
 _SEM_MODEL = None
+
 def _sem_embed(texts):
-    """Return np.ndarray embeddings or None if unavailable."""
+    """Return np.ndarray embeddings or None if unavailable. Uses per-text caching in _emb_cache.
+
+    Accepts single string or list of strings. Cached embeddings are stored per normalized text
+    with TTL = TTL_EMB_DAYS * 86400 seconds.
+    """
     try:
         import numpy as _np
     except Exception:
         return None
+
+    single = False
+    if not isinstance(texts, (list, tuple)):
+        single = True
+        texts = [texts]
+
+    # normalize and check cache per text
+    to_compute = []
+    to_compute_idx = []
+    results = [None] * len(texts)
+
+    for i, t in enumerate(texts):
+        key = json.dumps({"model": "sem_v1", "text": " ".join(str(t).split()).strip().lower()}, sort_keys=True, separators=(",", ":"))
+        cached = _emb_cache.get(key)
+        if cached is not None:
+            results[i] = _np.array(cached)
+        else:
+            to_compute.append(t)
+            to_compute_idx.append(i)
+
+    # If all cached, return
+    if not to_compute:
+        arr = _np.array(results)
+        return arr[0] if single else arr
+
+    # Initialize model if necessary (keeps previous behavior)
+    global _SEM_MODEL
     try:
-        global _SEM_MODEL
         if _SEM_MODEL is None:
             try:
-                from semantic_search import SemanticSearchEngine as _SSE
+                # Try package-qualified import first (preferred when run as installed package)
+                from mcp_system.embeddings.semantic_search import SemanticSearchEngine as _SSE
                 _SEM_MODEL = _SSE()
+            except Exception:
+                try:
+                    # Try relative import when running from repo
+                    from .embeddings.semantic_search import SemanticSearchEngine as _SSE
+                    _SEM_MODEL = _SSE()
+                except Exception:
+                    try:
+                        # Last-ditch attempt: plain module name in path
+                        from semantic_search import SemanticSearchEngine as _SSE
+                        _SEM_MODEL = _SSE()
+                    except Exception:
+                        # Fallback to sentence-transformers if no semantic_search implementation found
+                        from sentence_transformers import SentenceTransformer
+                        _SEM_MODEL = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+                        _SEM_MODEL._encode = lambda txts: _np.array(_SEM_MODEL.encode(txts))
+
+            # If we obtained a SemanticSearchEngine-like object, wrap its encode/embed to a common API
+            if _SEM_MODEL is not None and not hasattr(_SEM_MODEL, '_encode'):
                 def _emb_ss(txts):
                     if hasattr(_SEM_MODEL, 'encode'):
                         return _np.array(_SEM_MODEL.encode(txts))
@@ -191,14 +385,32 @@ def _sem_embed(texts):
                         return _np.array(_SEM_MODEL.embed(txts))
                     return None
                 _SEM_MODEL._encode = _emb_ss
-            except Exception:
-                from sentence_transformers import SentenceTransformer
-                _SEM_MODEL = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
-                _SEM_MODEL._encode = lambda txts: _np.array(_SEM_MODEL.encode(txts))
-        vecs = _SEM_MODEL._encode(texts if isinstance(texts, (list, tuple)) else [texts])
-        return vecs
+    except Exception:
+        # If model initialization fails, return what we have (may contain None entries)
+        return None
+
+    try:
+        vecs = _SEM_MODEL._encode(to_compute if isinstance(to_compute, (list, tuple)) else [to_compute])
     except Exception:
         return None
+
+    # vecs -> array-like of embeddings for to_compute
+    try:
+        for j, v in enumerate(vecs):
+            orig_i = to_compute_idx[j]
+            emb = _np.array(v)
+            results[orig_i] = emb
+            # persist in cache as list for json-serializable storage
+            key = json.dumps({"model": "sem_v1", "text": " ".join(str(to_compute[j]).split()).strip().lower()}, sort_keys=True, separators=(",", ":"))
+            try:
+                _emb_cache.set(key, emb.tolist(), ttl=TTL_EMB_DAYS * 86400)
+            except Exception:
+                pass
+    except Exception:
+        return None
+
+    arr = _np.array(results)
+    return arr[0] if single else arr
 
 def _cosine_sim(a, b):
     try:
@@ -359,28 +571,117 @@ def _get_memory() -> Optional['MemoryStore']:
     if not _HAS_MEMORY:
         if not _MEMORY_WARNED:
             try:
+                # Informative message explaining absence and suggestion
                 sys.stderr.write("[mcp_server_enhanced] ℹ️ MemoryStore desativado (_HAS_MEMORY=False). Nenhum resumo será persistido.\n")
+                sys.stderr.write("[mcp_server_enhanced] Dica: instale ou exponha a classe MemoryStore em mcp_system.memory_store para habilitar persistência de resumos e métricas.\n")
             except Exception:
                 pass
             _MEMORY_WARNED = True
         return None
     try:
         if _memory is None:
-            root = Path(INDEX_ROOT)
-            _memory = MemoryStore(root)  # type: ignore[name-defined]
+            package_dir = Path(__file__).resolve().parent
+            # Determine desired data_dir/db_path based on env or default
+            data_dir = os.environ.get("MCP_DATA_DIR", str(package_dir / ".mcp_memory"))
+            os.makedirs(data_dir, exist_ok=True)
+            desired_db_path = os.path.join(data_dir, "session_store.sqlite3")
+
+            # Attempt to use module-level 'store' if initialized at bootstrap and matches desired DB
+            candidate = globals().get('store')
+            if candidate is not None:
+                try:
+                    cand_db = getattr(candidate, 'db_path', None)
+                    if cand_db and os.path.abspath(str(cand_db)) == os.path.abspath(desired_db_path):
+                        _memory = candidate
+                    else:
+                        # existing store points to a different DB: create a new instance for this desired DB
+                        try:
+                            _memory = MemoryStore(db_path=desired_db_path)  # type: ignore[name-defined]
+                        except TypeError:
+                            # fallback to project_root signature
+                            _memory = MemoryStore(project_root=Path(data_dir))  # type: ignore[name-defined]
+                except Exception:
+                    # On any error try to create a fresh MemoryStore
+                    try:
+                        _memory = MemoryStore(db_path=desired_db_path)  # type: ignore[name-defined]
+                    except Exception:
+                        _memory = None
+            else:
+                # No candidate store: create one pointing to desired DB
+                try:
+                    _memory = MemoryStore(db_path=desired_db_path)  # type: ignore[name-defined]
+                except TypeError:
+                    # Fallback: try create_default_store factory if available
+                    try:
+                        create_default = getattr(MemoryStore, 'create_default_store', None)
+                        if callable(create_default):
+                            _memory = create_default(desired_db_path)
+                        else:
+                            _memory = MemoryStore(project_root=Path(data_dir))  # type: ignore[name-defined]
+                    except Exception:
+                        _memory = None
+
             try:
-                # Loga caminho do DB de memória para visibilidade
-                db_path = getattr(_memory, 'db_path', None)
-                if db_path:
-                    sys.stderr.write(f"[mcp_server_enhanced] 🧠 Memory DB em uso: {db_path}\n")
+                # Log the DB path for visibility
+                path = getattr(_memory, 'db_path', None)
+                if not path:
+                    path = getattr(_memory, 'db_file', None) or getattr(_memory, 'db', None)
+                if path:
+                    sys.stderr.write(f"[mcp_server_enhanced] 🧠 Memory DB em uso: {path}\n")
             except Exception:
                 pass
         return _memory
     except Exception:
         return None
 
-def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exclude_globs):
-    """Handler para indexar um caminho"""
+# Bootstrap: initialize store at module import / server startup when possible
+if _HAS_MEMORY:
+    try:
+        # Default to a package-local .mcp_memory directory to keep the MCP server self-contained.
+        package_dir = Path(__file__).resolve().parent
+        DATA_DIR = os.environ.get("MCP_DATA_DIR", str(package_dir / ".mcp_memory"))
+        os.makedirs(DATA_DIR, exist_ok=True)
+        DB_PATH = os.path.join(DATA_DIR, "session_store.sqlite3")
+        try:
+            store = MemoryStore(db_path=DB_PATH)  # type: ignore
+            logger.info("[MemoryStore] habilitado em %s", DB_PATH)
+            # Verbose startup check: log number of session summaries persisted so far
+            try:
+                # import helper that safely reports counts
+                from mcp_system.memory_store import get_memory_store_stats
+                stats = get_memory_store_stats(store)
+                if isinstance(stats, dict) and 'session_summaries_count' in stats:
+                    logger.info("[MemoryStore] session_summaries_count=%s", stats['session_summaries_count'])
+                else:
+                    logger.debug("[MemoryStore] stats (unexpected format): %s", stats)
+            except Exception as _e_stats:
+                logger.warning("[MemoryStore] falha ao obter stats iniciais: %s", repr(_e_stats))
+        except TypeError:
+            # fallback if signature is different (project_root first)
+            try:
+                store = MemoryStore(project_root=Path(DATA_DIR))  # type: ignore
+                logger.info("[MemoryStore] habilitado (fallback) em %s", DB_PATH)
+                # Verbose startup check for fallback instance
+                try:
+                    from mcp_system.memory_store import get_memory_store_stats
+                    stats = get_memory_store_stats(store)
+                    if isinstance(stats, dict) and 'session_summaries_count' in stats:
+                        logger.info("[MemoryStore] session_summaries_count=%s", stats['session_summaries_count'])
+                    else:
+                        logger.debug("[MemoryStore] stats (unexpected format): %s", stats)
+                except Exception as _e_stats2:
+                    logger.warning("[MemoryStore] falha ao obter stats iniciais (fallback): %s", repr(_e_stats2))
+            except Exception as e:
+                _HAS_MEMORY = False
+                store = None
+                logger.warning("[MemoryStore] falha ao iniciar: %s", repr(e))
+    except Exception as e:
+        _HAS_MEMORY = False
+        store = None
+        logger.warning("[MemoryStore] falha ao preparar DATA_DIR: %s", repr(e))
+
+def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exclude_globs, model_name=None, provider=None):
+    """Handler para indexar um caminho. Aceita model_name/provider opcionais para observabilidade."""
     # Validação de entrada
     if not path or not isinstance(path, str) or not path.strip():
         return {
@@ -417,7 +718,12 @@ def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exc
         }
 
     path = path.strip()  # Remove espaços extras
-    sys.stderr.write(f"🔍 [index_path] {path} (recursive={recursive}, semantic={enable_semantic}, watcher={auto_start_watcher})\n")
+
+    # Normalize client info
+    model_name = model_name or os.getenv('MCP_DEFAULT_MODEL') or 'unknown'
+    provider = provider or os.getenv('MCP_PROVIDER') or 'unknown'
+
+    sys.stderr.write(f"🔍 [index_path] {path} (recursive={recursive}, semantic={enable_semantic}, watcher={auto_start_watcher}) called by model={model_name} provider={provider}\n")
     sys.stderr.write(f"[mcp_server_enhanced] exclude_globs recebido: {exclude_globs}\n")
 
     try:
@@ -459,7 +765,7 @@ def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exc
                 files = int(result.get('files_indexed', 0)) if isinstance(result, dict) else 0
                 chunks = int(result.get('chunks', 0)) if isinstance(result, dict) else 0
                 title = f"Indexação concluída: {files} arquivos, {chunks} chunks"
-                details = f"Path: {path} | recursive={recursive} | semantic={enable_semantic} | watcher={auto_start_watcher}"
+                details = f"Path: {path} | recursive={recursive} | semantic={enable_semantic} | watcher={auto_start_watcher} | model={model_name} | provider={provider}"
                 mem.add_session_summary(project=str(Path(INDEX_ROOT).name), title=title, details=details, scope="index")
         except Exception:
             pass
@@ -486,6 +792,8 @@ def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exc
                 "include_globs": "",
                 "exclude_globs": ";".join(exclude_globs) if exclude_globs else "",
                 "elapsed_s": elapsed,
+                "model_name": model_name,
+                "provider": provider,
             }
 
             file_exists = metrics_path.exists()
@@ -507,8 +815,9 @@ def _handle_index_path(path, recursive, enable_semantic, auto_start_watcher, exc
         sys.stderr.write(f"❌ [index_path] Erro: {str(e)}\n")
         return {'status': 'error', 'error': str(e)}
 
-def _handle_search_code(query, limit, semantic_weight, use_mmr):
-    """Handler para buscar código"""
+def _handle_search_code(query, limit, semantic_weight, use_mmr, model_name=None, provider=None):
+    """Handler para buscar código. Agora aceita model_name/provider opcionais."""
+    import os
     # Validação de entrada
     if not query or not isinstance(query, str) or not query.strip():
         return {
@@ -538,7 +847,11 @@ def _handle_search_code(query, limit, semantic_weight, use_mmr):
         }
 
     query = query.strip()  # Remove espaços extras
-    sys.stderr.write(f"🔍 [search_code] '{query}' (limit={limit}, weight={semantic_weight}, mmr={use_mmr})\n")
+    # Normalize client info
+    model_name = model_name or os.getenv('MCP_DEFAULT_MODEL') or 'unknown'
+    provider = provider or os.getenv('MCP_PROVIDER') or 'unknown'
+    sys.stderr.write(f"🔍 [search_code] '{query}' (limit={limit}, weight={semantic_weight}, mmr={use_mmr}) called by model={model_name} provider={provider}\n")
+    logger.info("[search_code] model=%s provider=%s query=%s limit=%s", model_name, provider, query[:120], limit)
 
     try:
         if HAS_ENHANCED_FEATURES:
@@ -555,7 +868,8 @@ def _handle_search_code(query, limit, semantic_weight, use_mmr):
         return {
             'status': 'success',
             'results': results,
-            'count': len(results)
+            'count': len(results),
+            'client_info': {'model_name': model_name, 'provider': provider}
             }
 
     except Exception as e:
@@ -574,7 +888,7 @@ _last_query_tokens_saved = 0
 
 
 def _update_metrics_from_pack(pack: dict):
-    sent  = int(pack.get("total_tokens_sent", 0))
+    sent = int(pack.get("total_tokens_sent", pack.get("total_tokens", 0)))
     saved = int(pack.get("tokens_saved_total", 0))
     cache_saved = int(pack.get("cache_tokens_saved", 0))
     compr_saved = int(pack.get("compression_tokens_saved", 0))
@@ -587,12 +901,97 @@ def _update_metrics_from_pack(pack: dict):
         globals()["_cache_tokens_saved_total"] += cache_saved
         globals()["_compression_tokens_saved_total"] += compr_saved
 
+    # record llm usage best-effort (only if tokens present)
+    try:
+        if int(sent) > 0:
+            budget = pack.get('budget_info') or {}
+            # Prefer explicit model in budget_info, then environment variable if set.
+            # Do NOT use a hard-coded default here; if model is unknown we skip recording
+            # to avoid polluting the DB with misleading values.
+            model_name = budget.get('model') or os.getenv('MCP_DEFAULT_MODEL')
+            if not model_name or str(model_name).strip().lower() in ('', 'unknown'):
+                # skip recording if there is no meaningful model name
+                logger.debug("[metrics] skipping llm usage record due to missing model_name (budget=%s, env=%s)", budget.get('model'), os.getenv('MCP_DEFAULT_MODEL'))
+            else:
+                # Use _safe_record_llm_usage without passing a possibly stale `store` reference;
+                # let the helper obtain the correct active MemoryStore instance via _get_memory().
+                _safe_record_llm_usage(None, model_name, sent, calls=1)
+    except Exception:
+        pass
 
-def context_pack(query: str, token_budget: int = 800, max_chunks: int = 8, strategy: str = "mmr"):
-    # `indexer` deve ser a instância global já inicializada neste módulo
-    pack = build_context_pack(indexer=indexer, query=query, budget_tokens=token_budget, max_chunks=max_chunks, strategy=strategy)
+# Consolidate any legacy aliasing: ensure only a single canonical _update_metrics_from_pack exists
+# and remove any potential __update_metrics_from_pack leftover.
+try:
+    del __update_metrics_from_pack
+except Exception:
+    pass
+
+
+def _handle_context_pack(query: str, token_budget: int = 800, max_chunks: int = 8, strategy: str = "mmr", model_name=None, provider=None):
+    """Agora aceita model_name/provider opcionais e anexa nos packs para telemetria."""
+    # Normalize client info
+    model_name = model_name or os.getenv('MCP_DEFAULT_MODEL') or 'unknown'
+    provider = provider or os.getenv('MCP_PROVIDER') or 'unknown'
+    logger.info("[context_pack] model=%s provider=%s query=%s budget=%s", model_name, provider, (query or '')[:120], token_budget)
+
+    # Try to use search cache to avoid recomputing candidates
+    try:
+        norm = _normalize_query(query, {})
+        cache_key = json.dumps({"idx": getattr(_indexer, 'last_updated_iso', None), "q": norm}, sort_keys=True, separators=(",", ":"))
+        cached_pack = None
+        try:
+            cached_pack = _search_cache.get(cache_key) if _search_cache is not None else None
+        except Exception:
+            cached_pack = None
+        if cached_pack is not None:
+            # attach client info for observability
+            try:
+                cached_pack.setdefault('budget_info', {})['model'] = model_name
+                cached_pack.setdefault('client_info', {})['model_name'] = model_name
+                cached_pack.setdefault('client_info', {})['provider'] = provider
+            except Exception:
+                pass
+            _update_metrics_from_pack(cached_pack)
+            return {"status": "success", "data": cached_pack}
+    except Exception:
+        pass
+
+    # `indexer` deve ser a instância global já inicializada nesse módulo
+    pack = build_context_pack(
+        indexer=indexer,
+        query=query,
+        budget_tokens=token_budget,
+        max_chunks=max_chunks,
+        strategy=strategy
+    )
+
+    # attach client info into pack for downstream metrics/telemetry
+    try:
+        pack.setdefault('budget_info', {})['model'] = model_name
+        pack.setdefault('client_info', {})['model_name'] = model_name
+        pack.setdefault('client_info', {})['provider'] = provider
+    except Exception:
+        pass
+
+    # apply token budget truncation to snippets
+    try:
+        pack = _apply_budget_to_pack(pack)
+    except Exception:
+        pass
+
+    # store in search cache for subsequent context_pack calls
+    try:
+        if _search_cache is not None and cache_key is not None:
+            _search_cache.set(cache_key, pack, ttl=TTL_SEARCH_S)
+    except Exception:
+        pass
+
     _update_metrics_from_pack(pack)
     return {"status": "success", "data": pack}
+
+def context_pack(query: str, token_budget: int = 800, max_chunks: int = 8, strategy: str = "mmr"):
+    # Wrapper compatível que usa a implementação única
+    return _handle_context_pack(query, token_budget, max_chunks, strategy)
 
 
 def ensure_ready():
@@ -670,9 +1069,44 @@ def _handle_get_stats():
     data["cache_tokens_saved_total"] = globals().get("_cache_tokens_saved_total", 0)
     data["compression_tokens_saved_total"] = globals().get("_compression_tokens_saved_total", 0)
 
+    # Fallback: se acumuladores estiverem zerados, tentar agregar a partir do CSV de métricas (metrics_context.csv)
+    try:
+        if int(data.get("tokens_sent_total", 0)) == 0:
+            # localizar o arquivo de métricas usado pelo indexer
+            metrics_path = os.environ.get("MCP_METRICS_FILE")
+            if not metrics_path:
+                metrics_path = str(pathlib.Path(__file__).parent / ".mcp_index/metrics_context.csv")
+            if os.path.exists(metrics_path):
+                import csv as _csv
+                s_sent = 0
+                s_saved = 0
+                with open(metrics_path, newline='', encoding='utf-8') as mf:
+                    reader = _csv.DictReader(mf)
+                    for row in reader:
+                        try:
+                            tok = float(row.get('total_tokens', row.get('total_tokens_sent', 0)) or 0)
+                        except Exception:
+                            tok = 0
+                        s_sent += tok
+                        try:
+                            saved = float(row.get('tokens_saved_total', 0) or 0)
+                        except Exception:
+                            saved = 0
+                        s_saved += saved
+                # somente sobrescrever se agregados > 0
+                if s_sent > 0:
+                    data['tokens_sent_total'] = s_sent
+                if s_saved > 0:
+                    data['tokens_saved_total'] = s_saved
+    except Exception:
+        pass
+
     return {"status": "success", "action": "get_stats", "data": data}
 
-def _handle_cache_management(action, cache_type):
+def _handle_cache_management(action, cache_type, model_name=None, provider=None):
+    model_name = model_name or os.getenv('MCP_DEFAULT_MODEL') or 'unknown'
+    provider = provider or os.getenv('MCP_PROVIDER') or 'unknown'
+    logger.info("[cache_management] action=%s cache_type=%s called by model=%s provider=%s", action, cache_type, model_name, provider)
     """Handler para gestão de cache"""
     # Validação de entrada
     if not action or not isinstance(action, str) or not action.strip():
@@ -901,10 +1335,10 @@ def search_code(query: str,
 def context_pack(query: str,
                  token_budget: int = 8000,
                  max_chunks: int = 20,
-                 strategy: str = "mmr") -> dict:
+                 strategy: str = "mmr", model_name: str = None, provider: str = None) -> dict:
     """Cria pacote de contexto otimizado para LLMs"""
-    # Use explicit facade instead of _handle_context_pack
-    return context_pack(query, token_budget, max_chunks, strategy)
+    # Forward to the internal handler to avoid recursion and support client info
+    return _handle_context_pack(query, token_budget, max_chunks, strategy, model_name, provider)
 
 @mcp.tool()
 def auto_index(action: str = "status", paths: list = None, recursive: bool = True) -> dict:

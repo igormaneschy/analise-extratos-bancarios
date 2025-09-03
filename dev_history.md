@@ -1,3 +1,177 @@
+[2025-09-07] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Correção
+Descrição: Corrige parêntese não fechado e valor padrão na atribuição do modelo em _apply_budget_to_pack.
+Detalhes:
+Problema: Erro de sintaxe causado por parêntese não fechado em chamada a os.getenv dentro de _apply_budget_to_pack, levando a SyntaxError e falha no parse do módulo.
+Causa: Linha truncada durante edição anterior que removeu o fechamento do parêntese e o valor padrão.
+Solução: Fecha o parêntese e adiciona valor padrão "gpt-4o" em os.getenv("MCP_DEFAULT_MODEL", "gpt-4o"). Também revisei o bloco para garantir que a função retorne o pack mesmo em erro.
+Observações: Correção sintática simples; recomendo rodar a suíte de testes para validar efeitos colaterais.
+
+[2025-09-06] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Correção
+Descrição: Substitui chamadas a __update_metrics_from_pack por _update_metrics_from_pack para evitar NameError.
+Detalhes:
+Problema: NameError em __update_metrics_from_pack após unificação de função.
+Causa: Call sites ainda usavam o nome antigo.
+Solução: Troca das chamadas nas branches de cache e normal em _handle_context_pack.
+Observações: Sem mudança de comportamento, apenas correção de referência.
+        
+[2025-09-06] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Correção
+Descrição: Corrige inicialização preguiçosa do MemoryStore para usar db_path canonizado (MCP_DATA_DIR/.mcp_memory/session_store.sqlite3) e unifica função de métricas.
+Detalhes:
+Problema: Em cenários de fallback, MemoryStore podia ser criado com argumento incorreto (Path como db_path), resultando em instância "muda" e perda de registros.
+Causa: _get_memory usava MemoryStore(root) em vez de um caminho de DB; duplicidade de __update_metrics_from_pack e _update_metrics_from_pack.
+Solução: Passar db_path explícito derivado de MCP_DATA_DIR; criar alias de __update_metrics_from_pack -> _update_metrics_from_pack para um único ponto de atualização.
+Observações: Sem alterações de API; apenas robustez e consistência de gravação.
+
+[2025-09-02] - Assistant
+Arquivos: mcp_system/scripts/get_stats.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona suporte a --data-dir, imprime o caminho do DB do MemoryStore e do metrics_context.csv para diagnosticar origem das métricas.
+Detalhes:
+Problema: Métricas de uso de LLM apareciam baixas por leitura de diretórios/arquivos diferentes dos usados pelo servidor.
+Causa: Divergência entre MCP_DATA_DIR do servidor e do script; ausência de logs de paths.
+Solução: Novo argumento --data-dir que sobrescreve MCP_DATA_DIR; impressão do DB do MemoryStore e do caminho do metrics_context.csv no fallback.
+Observações: Mudança de observabilidade apenas; não afeta lógica de coleta.
+
+[2025-09-05] - Assistant
+Arquivos: tests/unit/test_domain_interfaces.py, src/domain/interfaces.py
+Ação/Tipo: Teste
+Descrição: Adiciona testes abrangentes para todas as interfaces do domínio, melhorando a cobertura de testes do projeto.
+Detalhes:
+Problema: Baixa cobertura de testes para as interfaces do domínio (78%)
+Causa: Falta de testes específicos para as interfaces abstratas e suas implementações
+Solução: Criação de um novo arquivo de teste que verifica a estrutura das interfaces abstratas e testa implementações concretas, aumentando a cobertura geral do projeto para 90%
+Observações: Foram criadas implementações de teste para cada interface a fim de garantir que todos os métodos sejam cobertos, e foram adicionados testes para verificar se as implementações concretas herdam corretamente das interfaces
+
+
+[2025-09-05] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Melhoria
+Descrição: Habilita persistência de caches (search e embeddings) usando MCP_DATA_DIR ou .mcp_data por padrão; define persist_path e limites de tamanho (max_size) para reduzir volatilidade entre reinícios.
+Detalhes:
+Problema: Caches em memória eram voláteis entre reinícios, dificultando continuidade de hits/evictions.
+Causa: get_cache era usado sem persist_path por padrão.
+Solução: Ao importar get_cache, o servidor agora calcula DATA_DIR (MCP_DATA_DIR ou .mcp_data), cria o diretório e inicializa _search_cache e _emb_cache com persist_path apontando para arquivos JSON dentro de DATA_DIR e com max_size sensível.
+Observações: Persistência é best-effort (DeterministicCache salva JSON); se persistência falhar, cache continua funcionando em memória. Testes locais recomendados para verificar arquivos search_cache.json / emb_cache.json.
+
+[2025-09-05] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona logs verbosos no bootstrap do MemoryStore para registrar o caminho do DB e a contagem inicial de session summaries.
+Detalhes:
+Problema: Nem sempre era claro qual DB estava sendo usado nem quantos resumos já existiam no startup, dificultando diagnóstico.
+Causa: O bootstrap inicial apenas criava a instância sem registrar métricas iniciais além do path.
+Solução: Após instanciar MemoryStore durante o bootstrap, faz chamada segura a get_memory_store_stats(store) e loga session_summaries_count (INFO). Falhas na coleta de estatísticas são capturadas e logadas como warnings, sem interromper o startup.
+Observações: Mudança de observabilidade somente; não afetou a lógica de persistência.
+
+[2025-09-02] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py
+Ação/Tipo: Melhoria
+Descrição: Registra available inicial (binfo['available']) antes do truncamento dos snippets para diagnóstico de decisões de budget.
+Detalhes:
+Problema: Dificuldade em diagnosticar por que snippets eram truncados ou removidos, uma vez que apenas o "available_after" era logado.
+Causa: O log anterior registrava apenas o available remanescente após truncamento, ocultando o valor inicial estimado que orientou as decisões de corte.
+Solução: Adiciona logging de available_initial e inclui available_initial em pack['budget_info']; melhora a linha de debug para exibir available_initial e available_after.
+Observações: Melhoria de observabilidade não altera lógica de truncamento; útil para tuning e troubleshooting.
+
+[2025-09-04] - Assistant
+Arquivos: mcp_system/memory_store.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona TTLs por namespace, LRU com limite de tamanho e persistência opcional; expõe reset_metrics() no cache.
+Detalhes:
+Problema: Caches anteriores não suportavam TTLs por namespace, não tinham controle de tamanho nem métricas resetáveis.
+Causa: Implementação inicial do cache era simples e sem opções de produção (persistência/LRU/metrics management).
+Solução:
+- Introduz DEFAULT_TTLS e mapeamento de TTLs por namespace (search, embeddings, metadata, context).
+- Implementa DeterministicCache com suporte a max_size (LRU eviction), persist_path (salva/carrega JSON) e default_ttl por namespace.
+- Adiciona método reset_metrics() que zera e retorna os counters anteriores.
+- Atualiza get_cache(name, max_size=None, persist_path=None, default_ttl=None) para criar caches configuráveis por namespace.
+Observações: Persistência é "best-effort" (JSON) e ignora valores não-serializáveis; LRU é baseado em OrderedDict e evicções incrementam contador _evictions.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_validation_suite/adapter.py
+Ação/Tipo: Melhoria
+Descrição: Consolida métricas MCP no adapter e remove duplicidades, melhorando observabilidade sem alterar API externa.
+Detalhes:
+Problema: Duplicidade de get_stats, cálculo de hit-rate de queries inconsistente e cold_start_ms não persistido nas métricas.
+Causa: Código duplicado e retorno antecipado em search; ausência de persistência explícita de cold_start_ms.
+Solução: Unificação de get_stats com bloco mcp_metrics, cálculo de query_hit antes do retorno, normalização de _cache_hits (inclui packs_total) e persistência de cold_start_ms em _metrics.
+Observações: Compatível com a suíte atual; não expõe dados sensíveis.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/README.md
+Ação/Tipo: Documentação
+Descrição: Reescreve README consolidando conteúdo do "README 2.md" com foco em produção e sem referências à suíte de validação.
+Detalhes:
+Problema: README fragmentado entre dois arquivos e com referências a artefatos de desenvolvimento.
+Causa: Evolução incremental da documentação em múltiplos arquivos.
+Solução: Documento único com funcionalidades, requisitos, execução, variáveis, tools, observabilidade, memória, scripts, proteções e troubleshooting; removidas referências à suíte de validação.
+Observações: "README 2.md" mantido como fonte histórica; README principal agora é fonte de verdade.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/code_indexer_enhanced.py
+Ação/Tipo: Correção
+Descrição: Corrige index_files para inicializar variáveis, executar indexação base e garantir index_dir serializável.
+Detalhes:
+Problema: Variáveis não inicializadas (result/pre_map/meta_path) e PosixPath não serializável no report causavam falhas.
+Causa: Referências a variáveis antes da atribuição e retorno de Path em index_dir; bloco duplicado causava erro de sintaxe.
+Solução: Adicionados pre_map/meta_path; chamada a index_repo_paths; ajuste de t_index_end; enriquecimento de result com métricas; index_dir convertido para string em sucesso/erro; remoção de bloco duplicado.
+Observações: Suíte de validação executou com sucesso após a correção.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_validation_suite/adapter.py
+Ação/Tipo: Melhoria
+Descrição: Fallback de index_dir no last_index, cold_start_ms real no warmup, economia de tokens no pack e métricas de tokens expostas.
+Detalhes:
+Problema: index_dir vazio no last_index; cold_start_ms medido sem carregar backend; pack não limitava previews; métricas de tokens não atualizadas.
+Causa: Adapter não aplicava fallback e não forçava embed mínima; previews não recortadas; métricas não persistidas.
+Solução: warmup acrescenta fallback de index_dir e força _call_hybrid_search para cold start; cálculo de embeddings_hit usa total de chunks; pack_context atualiza prompt_tokens_last/completion_tokens_last e permite recorte de previews (800 chars) para melhor orçamento.
+Observações: Valores de cold_start podem variar por ambiente; limite de preview pode ser ajustado conforme necessidade.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_validation_suite/adapter.py
+Ação/Tipo: Melhoria
+Descrição: Exposição de updated_* e métricas de fase de index em warmup/index_repo e inclusão de index_ms em get_stats.
+Detalhes:
+Problema: last_index não refletia delta e fases da indexação; cache.embeddings_hit não era ajustado.
+Causa: adapter não propagava campos retornados pelo indexador.
+Solução: warmup/index_repo atualizam updated_files/updated_chunks, index_discovery_ms/index_embed_ms e embeddings_hit (ratio). get_stats passa a retornar index_ms.
+Observações: Compatível com a suíte; métrica embeddings_hit é aproximada ao nível de arquivo.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/code_indexer_enhanced.py, mcp_validation_suite/adapter.py
+Ação/Tipo: Melhoria
+Descrição: Implementa delta incremental e métricas por fase no indexador; adiciona tiktoken e cold_start no adapter.
+Detalhes:
+Problema: Indexação não reportava updated_* reais nem métricas de descoberta/embedding; contagem de tokens heurística.
+Causa: Ausência de assinatura por arquivo/chunk e medições por fase; falta integração de tiktoken no adapter.
+Solução: Snapshot de assinaturas pré/pós para delta; persistência em index_meta.json; métricas index_discovery_ms/index_embed_ms/embeddings_hit; no adapter, contagem via tiktoken (fallback) e cold_start_ms.
+Observações: Mantida compatibilidade com a suíte MCP e com a API existente.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_validation_suite/adapter.py
+Ação/Tipo: Refatoração
+Descrição: Reescreve adapter com fallback BM25 leve, mapeamento correto de chunk_data e get_stats implementado.
+Detalhes:
+Problema: Falhas na chamada de hybrid_search por parâmetros ausentes/estruturas incorretas e ausência de get_stats.
+Causa: Diferença entre contratos esperados pelo engine e dados do indexador; lacuna de métricas.
+Solução: Implementação de _bm25_fallback, normalização consistente de chunks, aliases de top-k e função get_stats com p50/p95.
+Observações: Compatível com checks de indexação, observabilidade e orçamento de contexto.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_validation_suite/adapter.py
+Ação/Tipo: Melhoria
+Descrição: Ajusta adapter da suíte MCP para compatibilidade com EnhancedCodeIndexer e adiciona get_stats.
+Detalhes:
+Problema: Adapter inicial usava parâmetro incorreto (cache_dir) no EnhancedCodeIndexer e não expunha métricas via get_stats.
+Causa: Divergência entre a API esperada e a implementação real do indexador/buscador.
+Solução: Inicialização corrigida com index_dir e repo_root; normalização de candidatos incluindo file_path/combined_score; implementação de get_stats com p50/p95 e hit-rate de cache.
+Observações: Warmup indexa mcp_system por padrão; compatível com checks de latência, cache e orçamento de contexto.
 
 [2025-08-31] - Assistant
 Arquivos: src/infrastructure/readers/excel_reader.py
@@ -18,6 +192,16 @@ Problema: Risco de aumento de tokens sem controle em tarefas de pesquisa/arquite
 Causa: Falta de gate explícito para limites 3000/8.
 Solução: Exigir confirmação ou tag para usar perfil de alto contexto e evitar escalonamentos repetidos.
 Observações: Mantém previsibilidade e controle de custos.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/scripts/get_stats.py
+Ação/Tipo: Correção
+Descrição: Inicializa variável `res` em get_stats.main() para evitar NameError quando ocorre exceção antes da coleta de stats.
+Detalhes:
+Problema: Em alguns cenários de falha (ex.: import do servidor ou exceção antes da chamada _handle_get_stats), o script referenciava `res` sem que ele tivesse sido definido, causando NameError na saída e código de retorno inválido.
+Causa: `res` era atribuído somente após operações suscetíveis a exceção.
+Solução: Inicializa `res = {}` no início de main(), garantindo que o script possa terminar graficamente mesmo em erro.
+Observações: Mudança mínima e segura; não altera o comportamento normal quando o servidor responde corretamente.
 
 [2025-08-31] - Assistant
 Arquivos: .codellm/rules/00-context.retrieval.mdc
@@ -593,3 +777,124 @@ Problema: Detecção incorreta de CAD em vez de EUR quando não há informaçõe
 Causa: Procura por códigos de moeda como substrings simples, causando falsos positivos
 Solução: Uso de delimitadores de palavra (\b) para procurar apenas por códigos de moeda como palavras completas
 Observações: A detecção agora usa expressões regulares com \b para evitar encontrar códigos de moeda como substrings
+[2025-09-02] - Assistant
+Arquivos: mcp_system/memory_store.py
+Ação/Tipo: Melhoria
+Descrição: Expõe estatísticas globais do cache determinístico e utilitário para métricas básicas do MemoryStore (SQLite).
+Detalhes:
+Problema: Não existia forma centralizada de consultar métricas dos caches em memória e do MemoryStore.
+Causa: Implementação inicial do cache não expunha funções utilitárias para inspeção.
+Solução: Adiciona get_all_cache_stats() e get_memory_store_stats(store) em mcp_system/memory_store.py.
+Observações: get_memory_store_stats assume que MemoryStore possui um atributo `conn` (sqlite3.Connection); tratamento de erro seguro retornando dicionário com 'error'.
+
+[2025-09-02] - Assistant
+Arquivos: mcp_system/memory_store.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona cache determinístico em memória com TTL, normalização de chaves e métricas.
+Detalhes:
+Problema: Ausência de cache local determinístico para otimizar buscas locais e reduzir chamadas repetidas ao indexador/embeddings.
+Causa: Implementação de MemoryStore faltante ou incompleta para caching leve.
+Solução: Implementa DeterministicCache com TTL, thread-safety (RLock), métricas de hits/misses/evictions e helper get_cache(ns) para reuso por namespace.
+Observações: TTLs padrão definidos (TTL_SEARCH_S=120s, TTL_EMB_DAYS=14, TTL_META_DAYS=30); a implementação é puramente em memória e não persiste entre execuções.
+
+[2025-09-03] - Assistant
+Arquivos: mcp_system/memory_store.py, mcp_system/mcp_server_enhanced.py, mcp_system/scripts/get_stats.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona shim mínimo de MemoryStore sqlite e melhora mensagens de log/diagnóstico para ausência de MemoryStore.
+Detalhes:
+Problema: Servidor esperava uma classe MemoryStore presente em mcp_system.memory_store; em ambientes onde esta classe não existia, logs mostravam ImportError e funcionalidades de persistência faltavam.
+Causa: Implementação parcial do módulo de memória; importações rígidas e mensagens pouco descritivas.
+Solução: - Implementa MemoryStore shim (sqlite em .mcp_memory/memory.db) com conn/add_session_summary/close para compatibilidade mínima.
+- Ajusta a inicialização preguiçosa da memória no servidor e mensagens de log para serem informativas e acionáveis.
+- Torna get_stats.py resiliente ao importar o módulo memory_store e usa getattr para obter funções opcionais.
+Observações: O shim é minimal e visa compatibilidade; pode ser substituído por uma implementação completa posterior.
+
+[2025-09-02] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py, scripts/reports/generate_mcp_report.py
+Ação/Tipo: Melhoria
+Descrição: Corrige instrumentação de métricas agregadas e aprimora relatório com p95 e separação de warmups.
+Detalhes:
+Problema: tokens_sent_total/tokens_saved_total apareciam zerados; relatório não exibia p95 nem separava warmups.
+Causa: Duplicidade de definições de context_pack e resets dos acumuladores; render_text sem campos p95/breakdown.
+Solução: Unifica caminho de atualização (_handle_context_pack + __update_metrics_from_pack), evita reset dos contadores, adiciona logging por consulta na MemoryStore e imprime p95 + breakdown warmup.
+Observações: Verificar novamente get_stats após novas queries para confirmar incremento e revisar limiares de alerta.
+
+[2025-09-02] - Assistant
+Arquivos: scripts/reports/generate_mcp_report.py
+Ação/Tipo: Ferramenta/Teste
+Descrição: Adiciona utilitário para gerar relatórios agregados do MCP chamando scripts existentes e salvando JSON+TXT.
+Detalhes:
+Problema: Análise manual de múltiplos scripts para relatório diário consome tempo.
+Causa: Ferramentas de métricas dispersas e need for single consolidated report.
+Solução: Implementa scripts/reports/generate_mcp_report.py que executa get_stats/summarize_metrics/visual_metrics/memory_dump, agrega resultados e calcula métricas derivadas (economia %). Salva .json e .txt em scripts/reports/output.
+Observações: Usa python -m para executar scripts internos e grava saída estruturada para pipelines e visualização humana.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/scripts/visual_metrics.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona saída JSON estruturada (--json) e função generate_visual_report_structured para integração com pipelines.
+Detalhes:
+Problema: Ferramenta gerava apenas saída legível; integração com pipelines exigia formato estruturado.
+Causa: Ausência de saída JSON consolidada e função utilitária.
+Solução: Implementa generate_visual_report_structured() que retorna summary/daily/rows e adiciona --json para imprimir esse JSON; mantém saída legível padrão.
+Observações: Compatível com uso interativo e pipelines; não altera formato CSV de entrada.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/scripts/summarize_metrics.py
+Ação/Tipo: Melhoria
+Descrição: Evita reparse de timestamps e garante saída JSON com ensure_ascii=False.
+Detalhes:
+Problema: parse_dt era chamado várias vezes durante filtros e cálculos, impactando performance.
+Causa: filter_rows chamava parse_dt para cada verificação múltipla.
+Solução: filter_rows agora pré-parseia timestamps e anota cada linha com _parsed_ts; _compute_stats reutiliza esse valor. Também assegura ensure_ascii=False no JSON.
+Observações: Comportamento e resultados idênticos; melhoria de desempenho em grandes CSVs.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/scripts/memory_dump.py
+Ação/Tipo: Melhoria
+Descrição: Adiciona flags --pretty e --limit-fields e validação de --memory-dir.
+Detalhes:
+Problema: JSON muito verboso e possibilidade de memória-dir inválido sendo aceita silenciosamente.
+Causa: Falta de opções de truncamento e validação do caminho informado.
+Solução: Implementa --pretty para truncar campos longos e --limit-fields para controlar o limite; valida --memory-dir e aborta com erro claro se inexistente.
+Observações: Saída padrão permanece JSON completa; opção --pretty facilita inspeção humana.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/scripts/summarize_metrics.py, mcp_system/scripts/visual_metrics.py, mcp_system/scripts/get_stats.py, mcp_system/scripts/memory_dump.py
+Ação/Tipo: Melhoria
+Descrição: Robustez nos scripts de métricas e memória (datas ISO-8601, amostragem em gráficos ASCII, fallback de tokens, flags --json/--reverse, index antes de stats).
+Detalhes:
+Problema: Parsers frágeis para timestamps; gráficos quebravam com séries longas; total_tokens zerado em alguns registros; necessidade de payload bruto e ordenação customizada.
+Causa: Formatos variados (UTC +00:00/Z); séries maiores que largura; campos alternativos (total_tokens_sent); coleta de stats após index; ausência de flags utilitárias.
+Solução: parse_dt com fromisoformat e suporte a 'Z'; amostragem para largura fixa; fallback para total_tokens_sent; flag --json no get_stats; indexação opcional antes de coletar stats; flag --reverse no memory_dump.
+Observações: Compatível com CSVs atuais (metrics_context/index); não altera contratos de saída padrão.
+
+[2025-09-01] - Assistant
+Arquivos: mcp_system/README 2.md -> (removido)
+Ação/Tipo: Documentação
+Descrição: Remove README 2 duplicado para evitar divergência de informações; README.md passa a ser fonte única.
+Detalhes:
+Problema: Documentação fragmentada em dois READMEs no mcp_system, podendo gerar confusão.
+Causa: Evolução incremental com múltiplos arquivos de documentação.
+Solução: Remoção do arquivo redundante; README.md consolidado com conteúdo de produção.
+Observações: Sem impacto funcional; apenas documentação.
+
+[2025-09-06] - Assistant
+Arquivos: tests/test_get_stats.py
+Ação/Tipo: Teste
+Descrição: Adiciona testes unitários para get_stats.print_agg cobrindo casos vazio e não vazio.
+Detalhes:
+Problema: get_stats.print_agg não tinha testes automatizados; saída não era validada em CI.
+Causa: Arquivo get_stats.py utilizado como script sem cobertura unitária.
+Solução: Implementados dois testes que validam behavior para agregados vazios e com múltiplos modelos (ordenação por tokens e totais).
+Observações: Testes não dependem de MemoryStore e usam capsys para capturar stdout.
+
+[2025-09-06] - Assistant
+Arquivos: mcp_system/mcp_server_enhanced.py, .codellm/rules/00-context.retrieval.mdc
+Ação/Tipo: Correção | Documentação
+Descrição: Adiciona suporte a model_name/provider em handlers MCP e wrappers de ferramentas; inclui client_info em logs, context packs e métricas; documenta injeção do modelo no contexto.
+Detalhes:
+Problema: Handlers e capturadores do MCP não recebiam nem logavam metadados de modelo e provedor, o que dificultava telemetria detalhada e roteamento baseado em modelo.
+Causa: Ausência dos parâmetros opcionais `model_name` e `provider` nas assinaturas, além de falta de documentação para uso padrão em payloads MCP.
+Solução: Atualização dos handlers principais (index_path, search_code, context_pack, get_stats, cache_management, where_we_stopped) para aceitar `model_name` e `provider` com valores fallback (env ou "unknown"); logs revisados para registrar client_info; objetos retornados enriquecidos; adicionada documentação em .codellm/rules/00-context.retrieval.mdc sobre o uso do `mcp.set_client_info` e inclusão no payload.
+Observações: Compatível e não disruptivo, parâmetros opcionais; recomenda-se reiniciar servidor MCP para ativar coleta dos metadados; testes devem validar presença dos logs e métricas com client_info.

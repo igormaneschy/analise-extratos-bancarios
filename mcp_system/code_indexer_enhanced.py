@@ -3,18 +3,51 @@
 from __future__ import annotations
 import os, re, json, math, time, hashlib, threading, csv, datetime as dt
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Callable
 import pathlib
 
+import json
+
+# Ensure a module-level CURRENT_DIR so defaults don't rely on external modules' variables
+CURRENT_DIR = Path(__file__).parent.absolute()
+
+# Try to import local deterministic cache for search/embeddings
 try:
-    from memory_store import store_session_summary, store_next_action
-    _HAS_MEM = True
+    from mcp_system.memory_store import get_cache, TTL_SEARCH_S, TTL_EMB_DAYS
 except Exception:
     try:
-        from .memory_store import store_session_summary, store_next_action
-        _HAS_MEM = True
+        from .memory_store import get_cache, TTL_SEARCH_S, TTL_EMB_DAYS
     except Exception:
-        _HAS_MEM = False
+        get_cache = None
+        TTL_SEARCH_S = 120
+        TTL_EMB_DAYS = 14
+
+
+_search_cache = get_cache("search") if callable(globals().get('get_cache')) else None
+_emb_cache = get_cache("embeddings") if callable(globals().get('get_cache')) else None
+_meta_cache = get_cache("metadata") if callable(globals().get('get_cache')) else None
+
+# --- Métricas de contexto (arquivo CSV local, compatível com o servidor) ---
+try:
+    METRICS_CONTEXT_PATH = os.environ.get("MCP_METRICS_FILE", str(CURRENT_DIR / ".mcp_index/metrics_context.csv"))
+except Exception:
+    METRICS_CONTEXT_PATH = ".mcp_index/metrics_context.csv"
+
+def _log_metrics(row: dict) -> None:
+    """Anexa uma linha de métricas no CSV de contexto.
+    Best-effort: qualquer exceção é suprimida para não impactar latência do pack.
+    """
+    try:
+        os.makedirs(os.path.dirname(METRICS_CONTEXT_PATH), exist_ok=True)
+        file_exists = os.path.exists(METRICS_CONTEXT_PATH)
+        with open(METRICS_CONTEXT_PATH, "a", newline="", encoding="utf-8") as f:
+            import csv as _csv
+            w = _csv.DictWriter(f, fieldnames=list(row.keys()))
+            if not file_exists:
+                w.writeheader()
+            w.writerow(row)
+    except Exception:
+        pass
 
 
 # Função utilitária para obter timestamps UTC padronizados
@@ -26,24 +59,12 @@ def utc_timestamp() -> str:
     """
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
-#logs para métricas
 
-# Diretório atual deste módulo para resoluções relativas ao pacote mcp_system
-CURRENT_DIR = pathlib.Path(__file__).parent.absolute()
+def _normalize_query(q, opts):
+    qn = " ".join((q or "").split()).lower()
+    opts = opts or {}
+    return {"q": qn, "opts": {k: opts[k] for k in sorted(opts) if opts[k] is not None}}
 
-# CSV padrão para métricas de context_pack (consultas)
-# Mantém compatibilidade via env MCP_METRICS_FILE, mas por padrão separa em metrics_context.csv
-METRICS_PATH = os.environ.get("MCP_METRICS_FILE", str(CURRENT_DIR / ".mcp_index/metrics_context.csv"))
-
-def _log_metrics(row: dict):
-    """Append de uma linha de métricas em CSV."""
-    os.makedirs(os.path.dirname(METRICS_PATH), exist_ok=True)
-    file_exists = os.path.exists(METRICS_PATH)
-    with open(METRICS_PATH, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=row.keys())
-        if not file_exists:
-            w.writeheader()
-        w.writerow(row)
 
 # Tenta importar recursos avançados
 HAS_ENHANCED_FEATURES = True
@@ -98,7 +119,16 @@ def tokenize(text: str) -> List[str]:
 
 def est_tokens(text: str) -> int:
     # rough heuristic: ~4 chars per token
-    return max(1, int(len(text) / 4))
+    try:
+        if text is None:
+            return 1
+        return max(1, int(len(text) / 4))
+    except Exception:
+        # In case non-string types are passed, coerce to str and estimate
+        try:
+            return max(1, int(len(str(text)) / 4))
+        except Exception:
+            return 1
 
 def hash_id(s: str) -> str:
     return hashlib.blake2s(s.encode("utf-8"), digest_size=12).hexdigest()
@@ -106,10 +136,13 @@ def hash_id(s: str) -> str:
 # ========== INDEXADOR BASE ==========
 
 class BaseCodeIndexer:
-    def __init__(self, index_dir: str = str(CURRENT_DIR / ".mcp_index"), repo_root: str = str(CURRENT_DIR.parent)) -> None:
-        self.index_dir = Path(index_dir)
+    def __init__(self, index_dir: Optional[str] = None, repo_root: Optional[str] = None) -> None:
+        # Delay default evaluation to runtime to avoid NameError when modules import each other
+        idx_dir = index_dir or str(CURRENT_DIR / ".mcp_index")
+        rp_root = repo_root or str(CURRENT_DIR.parent)
+        self.index_dir = Path(idx_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
-        self.repo_root = Path(repo_root)
+        self.repo_root = Path(rp_root)
         self.chunks: Dict[str, Dict] = {}             # chunk_id -> data
         self.inverted: Dict[str, Dict[str, int]] = {} # term -> {chunk_id: tf}
         self.doc_len: Dict[str, int] = {}             # chunk_id -> token count
@@ -410,6 +443,92 @@ def index_repo_paths(
             pass
 
     indexer._save()
+
+    # Compute and persist index version. If the version changed, invalidate search/context/emb caches.
+    try:
+        old_ver = None
+        if globals().get('_meta_cache') is not None:
+            try:
+                old_ver = _meta_cache.get('index_version')
+            except Exception:
+                old_ver = None
+        new_ver = compute_index_version(indexer)
+
+        # persist index_version into in-memory meta cache when available
+        if globals().get('_meta_cache') is not None:
+            try:
+                _meta_cache.set('index_version', new_ver, ttl=None)
+            except Exception:
+                pass
+
+        # Also persist the index_version into the index_dir/meta.json so it survives process restarts
+        try:
+            meta_path = getattr(indexer, 'index_dir', None)
+            if meta_path is not None:
+                try:
+                    meta_p = Path(meta_path) / 'meta.json'
+                    meta_obj = {}
+                    if meta_p.exists():
+                        try:
+                            meta_obj = json.loads(meta_p.read_text(encoding='utf-8') or '{}') or {}
+                        except Exception:
+                            meta_obj = {}
+                    meta_obj['index_version'] = new_ver
+                    # preserve last_updated if available
+                    try:
+                        meta_obj['last_updated'] = getattr(indexer, 'last_updated', meta_obj.get('last_updated'))
+                    except Exception:
+                        pass
+                    meta_p.write_text(json.dumps(meta_obj, ensure_ascii=False), encoding='utf-8')
+                except Exception:
+                    # Do not fail the whole indexing if persisting meta.json fails
+                    pass
+        except Exception:
+            pass
+
+        if new_ver != old_ver:
+            logger.info(f"[index_repo_paths] index_version changed {old_ver} -> {new_ver}; clearing search/context/emb caches")
+            try:
+                if globals().get('_search_cache') is not None:
+                    try:
+                        _search_cache.clear()
+                    except Exception:
+                        pass
+                # clear generic context cache if exists
+                if callable(globals().get('get_cache')):
+                    try:
+                        ctx = get_cache('context')
+                        if ctx is not None:
+                            try:
+                                ctx.clear()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                # clear embeddings cache if present
+                try:
+                    if globals().get('_emb_cache') is not None:
+                        try:
+                            _emb_cache.clear()
+                        except Exception:
+                            pass
+                    elif callable(globals().get('get_cache')):
+                        try:
+                            emb = get_cache('embeddings')
+                            if emb is not None:
+                                try:
+                                    emb.clear()
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.warning(f"[index_repo_paths] falha ao limpar caches: {e}")
+    except Exception as e:
+        logger.debug(f"[index_repo_paths] compute_index_version failed: {e}")
+
     return {"files_indexed": files_indexed, "chunks": total_chunks}
 
 def _tokenize_for_bm25(text: str) -> List[str]:
@@ -523,14 +642,21 @@ def _summarize_chunk(c: Dict, query_tokens: List[str], max_lines: int = 18) -> s
     Sumariza o chunk pegando linhas que contenham termos da query.
     Se nada casar, usa as primeiras `max_lines` linhas.
     """
-    lines = c["content"].splitlines()
-    header = f"{c['file_path']}:{c['start_line']}-{c['end_line']}"
-    qset = set(query_tokens)
+    try:
+        # defensivo: content pode ser None ou estar ausente
+        lines = (c.get("content") or "").splitlines()
+    except Exception:
+        lines = []
+    header = f"{c.get('file_path', '')}:{c.get('start_line', 0)}-{c.get('end_line', 0)}"
+    qset = set(query_tokens or [])
 
-    picked = []
+    picked: List[str] = []
     for ln in lines:
-        tks = tokenize(ln)
-        if set(tks) & qset:
+        try:
+            tks = tokenize(ln)
+        except Exception:
+            tks = []
+        if qset and (set(tks) & qset):
             picked.append(ln)
         if len(picked) >= max_lines:
             break
@@ -541,8 +667,99 @@ def _summarize_chunk(c: Dict, query_tokens: List[str], max_lines: int = 18) -> s
     summary = header + "\n" + "\n".join(picked)
     return summary
 
-import math
-from typing import Callable, List, Tuple, Dict
+# --- Index version utilities ---
+
+def compute_index_version(indexer: BaseCodeIndexer) -> str:
+    """
+    Computa uma versão do índice baseado no hash dos chunks.
+    """
+    try:
+        chunks = getattr(indexer, "chunks", []) or []
+        # Considera id e texto
+        hasher = hashlib.sha256()
+        for ch in chunks:
+            cid = str(ch.get("chunk_id") or ch.get("id") or "")
+            text = ch.get("text") or ch.get("content") or ""
+            hasher.update(cid.encode("utf-8"))
+            hasher.update(text.encode("utf-8"))
+        return hasher.hexdigest()
+    except Exception:
+        return ""
+
+import json
+
+def search_code(indexer, query, limit=50, filters=None, use_semantic=None, semantic_weight=None, use_mmr=None):
+    # attempt to use search cache
+    cache_key = None
+    try:
+        if _search_cache is not None:
+            norm = _normalize_query(query, {})
+            # Prefer a robust index signature (hash of chunks) when available
+            try:
+                idx_version = compute_index_version(indexer)
+            except Exception:
+                idx_version = getattr(indexer, 'last_updated_iso', getattr(indexer, 'last_updated', None))
+
+            cache_payload = {
+                "idx": idx_version,
+                "q": norm,
+                "filters": filters or {},
+                "limit": int(limit) if limit is not None else None,
+                "semantic": bool(use_semantic) if use_semantic is not None else None,
+                "semantic_weight": float(semantic_weight) if semantic_weight is not None else None,
+                "use_mmr": bool(use_mmr) if use_mmr is not None else None,
+            }
+            cache_key = json.dumps(cache_payload, sort_keys=True, default=str, separators=(",", ":"))
+            cached = _search_cache.get(cache_key)
+            if cached is not None:
+                # Ensure sorting before returning
+                try:
+                    cached_sorted = sorted(cached, key=lambda r: (-r.get('score', 0.0), r.get('file_path', ''), r.get('chunk_id', '')))
+                    return cached_sorted[:limit]
+                except Exception:
+                    return cached[:limit]
+    except Exception:
+        cache_key = None
+
+    q_tokens = _tokenize_for_bm25(query)
+    _ensure_bm25_state(indexer)
+    bm25 = _bm25_scores(indexer, q_tokens)
+
+    cid_to_chunk = {}
+    for ch in _ensure_chunks(indexer):
+        cid = ch.get("chunk_id") or ch.get("id") or id(ch)
+        cid_to_chunk[cid] = ch
+
+    bm25.sort(key=lambda x: x[1], reverse=True)
+
+    results = []
+    for cid, sc in bm25[:limit]:
+        ch = cid_to_chunk.get(cid)
+        if ch:
+            preview_lines = ch.get("content", "").splitlines()[:12]
+            results.append({
+                "chunk_id": cid,
+                "file_path": ch.get("file_path", ""),
+                "start_line": ch.get("start_line", 0),
+                "end_line": ch.get("end_line", 0),
+                "score": sc,
+                "preview": "\n".join(preview_lines)
+            })
+
+    # Order results deterministically by (score DESC, file_path ASC, chunk_id ASC)
+    try:
+        results = sorted(results, key=lambda r: (-r.get('score', 0.0), r.get('file_path', ''), r.get('chunk_id', '')))
+    except Exception:
+        pass
+
+    # store in cache
+    try:
+        if _search_cache is not None and cache_key is not None:
+            _search_cache.set(cache_key, results)
+    except Exception:
+        pass
+
+    return results
 
 def _l2norm(v: List[float]) -> List[float]:
     s = math.sqrt(sum(x*x for x in v)) or 1.0
@@ -557,11 +774,77 @@ def _get_chunk_text(ch: Dict) -> str:
 
 def _embed_chunk(embed_fn: Callable[[str], List[float]], ch: Dict) -> Optional[List[float]]:
     txt = _get_chunk_text(ch)
+    # Normalize text for stable keys
+    text_key = " ".join(str(txt).split()).strip().lower()
+
+    # Try to use embeddings cache if available
+    try:
+        _local_emb_cache = _emb_cache if '_emb_cache' in globals() and _emb_cache is not None else None
+        ttl_days = TTL_EMB_DAYS if 'TTL_EMB_DAYS' in globals() else 14
+
+        cache_idx = None
+        try:
+            # If chunk provides an index_version field use it; otherwise try indexer-level last_updated
+            if isinstance(ch, dict):
+                cache_idx = ch.get('index_version') or ch.get('index_dir') or ch.get('index_hash')
+            else:
+                cache_idx = getattr(ch, 'index_version', None)
+        except Exception:
+            cache_idx = None
+
+        cache_key = json.dumps({"idx": cache_idx, "text": text_key}, sort_keys=True, separators=(',', ':'))
+
+        if _local_emb_cache is not None:
+            try:
+                cached = _local_emb_cache.get(cache_key)
+            except Exception:
+                cached = None
+            if cached is not None:
+                # Ensure a list of floats and L2-normalize
+                try:
+                    vec = list(cached)
+                    return _l2norm(vec) if vec else None
+                except Exception:
+                    # fallback to recompute
+                    pass
+    except Exception:
+        # Any cache-related error should not break embedding computation
+        pass
+
+    # Compute embedding
+    emb = None
     try:
         emb = embed_fn(txt) if embed_fn else None
     except Exception:
         emb = None
-    return _l2norm(emb) if emb else None
+
+    if emb:
+        # coerce to plain list of floats (in case of numpy/torch)
+        try:
+            vec = list(map(float, emb))
+        except Exception:
+            try:
+                vec = [float(x) for x in emb]
+            except Exception:
+                vec = None
+
+        if vec is not None:
+            # persist to cache if available
+            try:
+                if _local_emb_cache is not None and cache_key:
+                    try:
+                        _local_emb_cache.set(cache_key, vec, ttl=ttl_days * 86400)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                return _l2norm(vec)
+            except Exception:
+                return None
+
+    return None
 
 def _mmr_select(
     indexer_or_scored: object,
@@ -773,12 +1056,13 @@ def build_context_pack(
             continue
 
         header = f"{c['file_path']}:{c['start_line']}-{c['end_line']}"
-        summary = _summarize_chunk(c, q_tokens, max_lines=18)
+        # summary may occasionally be None due to upstream issues; coerce to string
+        summary = _summarize_chunk(c, q_tokens, max_lines=18) or ""
 
         raw_text = c.get('content', '')
         tokens_raw = est_tokens(raw_text)
 
-        snippet = summary
+        snippet = summary or ""
         tokens_sent = est_tokens(snippet)
 
         from_cache = c.get('from_cache', False)
@@ -822,13 +1106,18 @@ def build_context_pack(
     # --- LOG MÉTRICAS CSV ---
     try:
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        # incluir campos adicionais sobre tokens enviados/poupados para facilitar agregação
         _log_metrics({
             "ts": utc_timestamp(),
             "query": query[:160],
             "chunk_count": len(pack["chunks"]),
-            "total_tokens": pack["total_tokens"],
+            "total_tokens": pack.get("total_tokens", 0),
+            "total_tokens_sent": pack.get("total_tokens_sent", 0),
+            "tokens_saved_total": pack.get("tokens_saved_total", 0),
+            "cache_tokens_saved": pack.get("cache_tokens_saved", 0),
+            "compression_tokens_saved": pack.get("compression_tokens_saved", 0),
             "budget_tokens": budget_tokens,
-            "budget_utilization": round(pack["total_tokens"] / max(1, budget_tokens), 3),
+            "budget_utilization": round(pack.get("total_tokens", 0) / max(1, budget_tokens), 3),
             "latency_ms": latency_ms,
         })
     except Exception:
@@ -837,11 +1126,91 @@ def build_context_pack(
     return pack
 
 
+def compute_index_version(indexer: BaseCodeIndexer) -> str:
+    """Computes a deterministic version/hash for the current index content.
+
+    Strategy:
+    - Collect a stable list of files (file paths) and their chunk ids + content digests
+    - Build a canonical JSON structure with sorted keys and compute sha256
+    - Return short hex digest
+    """
+    try:
+        chunks = getattr(indexer, "chunks", {}) or {}
+        items = []
+        for cid in sorted(chunks.keys()):
+            ch = chunks[cid]
+            fp = ch.get("file_path", "")
+            start = ch.get("start_line", 0)
+            end = ch.get("end_line", 0)
+            text = ch.get("content", ch.get("text", ""))
+            # small digest of content for stability and performance
+            h = hashlib.sha256((str(text) or "").encode("utf-8")).hexdigest()
+            items.append({"chunk_id": cid, "file_path": fp, "start": start, "end": end, "digest": h})
+        canonical = json.dumps(items, ensure_ascii=False, sort_keys=True)
+        ver = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+        return ver
+    except Exception:
+        # fallback to last_updated timestamp if present
+        try:
+            if getattr(indexer, "last_updated", None):
+                return hashlib.sha256(str(indexer.last_updated).encode("utf-8")).hexdigest()[:16]
+        except Exception:
+            pass
+        return "unknown"
+
+
+def get_current_index_version() -> str:
+    """Return current index version stored in metadata cache, meta.json on disk, or 'unknown'.
+
+    Search order:
+    1) in-memory _meta_cache (fast)
+    2) meta.json in default index_dir (if present)
+    3) fallback 'unknown'
+    """
+    # 1) Try meta cache
+    try:
+        if globals().get('_meta_cache') is not None:
+            try:
+                v = _meta_cache.get('index_version')
+                if v:
+                    return v
+            except Exception:
+                pass
+    except Exception:
+        # defensive: if globals() or _meta_cache access fails
+        pass
+
+    # 2) Try meta.json file in a default index_dir (scan common paths)
+    try:
+        possible_dirs = []
+        if globals().get('CURRENT_DIR') is not None:
+            possible_dirs.append(str(Path(CURRENT_DIR) / '.mcp_index'))
+        # Check common working directories
+        possible_dirs.extend(['.mcp_index', str(Path(__file__).parent / '.mcp_index')])
+        for d in possible_dirs:
+            try:
+                p = Path(d) / 'meta.json'
+                if p.exists():
+                    try:
+                        obj = json.loads(p.read_text(encoding='utf-8') or '{}') or {}
+                        if obj.get('index_version'):
+                            return obj.get('index_version')
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+    except Exception:
+        # ignore any unexpected errors while scanning filesystem
+        pass
+
+    return 'unknown'
+
+
 # ========== INDEXADOR MELHORADO ==========
 
 class EnhancedCodeIndexer:
     """
-    Indexador de código melhorado que combina:
+    Indexador de código mejorado que combina:
     - BM25 search (do indexador original)
     - Busca semântica com embeddings
     - Auto-indexação com file watcher
@@ -879,6 +1248,15 @@ class EnhancedCodeIndexer:
 
         # Flag de carregamento do índice
         self._index_loaded = False
+
+        # Métricas da última indexação (descoberta/embedding/delta/cache)
+        self._last_index_metrics: Dict[str, int] = {
+            "index_discovery_ms": 0,
+            "index_embed_ms": 0,
+            "updated_files": 0,
+            "updated_chunks": 0,
+            "embeddings_hit": 0,
+        }
 
         if self.enable_semantic:
             try:
@@ -1037,14 +1415,52 @@ class EnhancedCodeIndexer:
                 # Aplica padrão DEFAULT_EXCLUDE se exclude_globs for None ou lista vazia
                 effective_exclude = exclude_globs if exclude_globs else DEFAULT_EXCLUDE
 
-                # Usa função de indexação base
+                import time, json, hashlib
+
+                # Métrica: início da descoberta
+                t_disc_start = time.time()
+
+                # Snapshot pré-indexação: assinatura por arquivo baseada nos chunks atuais
+                def _build_file_signatures(chunks_any) -> Dict[str, Dict[str, Any]]:
+                    file_map: Dict[str, Dict[str, Any]] = {}
+                    try:
+                        if isinstance(chunks_any, dict):
+                            values = chunks_any.values()
+                        elif isinstance(chunks_any, list):
+                            values = chunks_any
+                        else:
+                            values = []
+                        tmp: Dict[str, List[str]] = {}
+                        for c in values:
+                            fp = c.get("file_path") or ""
+                            if not fp:
+                                continue
+                            cid = str(c.get("chunk_id") or c.get("id") or id(c))
+                            text = (c.get("content") or c.get("text") or "")[:2000]
+                            h = hashlib.sha256((cid + "|" + text).encode()).hexdigest()
+                            tmp.setdefault(fp, []).append(h)
+                        for fp, hashes in tmp.items():
+                            hashes.sort()
+                            sig = hashlib.sha256("".join(hashes).encode()).hexdigest()
+                            file_map[fp] = {"sig": sig, "chunks": len(hashes)}
+                    except Exception:
+                        pass
+                    return file_map
+
+                # snapshot antes de indexar
+                pre_map = _build_file_signatures(getattr(self.base_indexer, "chunks", {}))
+                meta_path = Path(self.index_dir) / "index_meta.json"
+
+                # Executa indexação base
                 result = index_repo_paths(
                     self.base_indexer,
                     paths=paths,
                     recursive=recursive,
                     include_globs=include_globs,
-                    exclude_globs=effective_exclude
+                    exclude_globs=list(effective_exclude) if isinstance(effective_exclude, (list, set, tuple)) else DEFAULT_EXCLUDE,
                 )
+
+                t_index_end = time.time()
 
                 if show_progress:
                     logger.info(f"✅ Indexação concluída: {result.get('files_indexed', 0)} arquivos, {result.get('chunks', 0)} chunks")
@@ -1062,11 +1478,80 @@ class EnhancedCodeIndexer:
                 except Exception:
                     pass
 
+                # Snapshot pós-indexação e delta
+                post_map = _build_file_signatures(getattr(self.base_indexer, "chunks", {}))
+
+                updated_files = 0
+                updated_chunks = 0
+                embeddings_hit = 0
+                all_files = set(pre_map.keys()) | set(post_map.keys())
+                for fp in all_files:
+                    pre = pre_map.get(fp)
+                    post = post_map.get(fp)
+                    if not post:
+                        continue
+                    if not pre or pre.get("sig") != post.get("sig"):
+                        updated_files += 1
+                        updated_chunks += int(post.get("chunks", 0))
+                    else:
+                        embeddings_hit += int(post.get("chunks", 0))
+
+                # Métricas de fase
+                t_disc_end = time.time()
+                index_discovery_ms = int((t_disc_end - t_disc_start) * 1000)
+                total_ms = int((t_index_end - t_disc_start) * 1000)
+                index_embed_ms = max(0, total_ms - index_discovery_ms)
+
+                # Persistir meta simples para próxima execução
+                try:
+                    meta_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump({"files": post_map}, f)
+                except Exception:
+                    pass
+
+                # Atualizar métricas locais
+                self._last_index_metrics = {
+                    "index_discovery_ms": index_discovery_ms,
+                    "index_embed_ms": index_embed_ms,
+                    "updated_files": updated_files,
+                    "updated_chunks": updated_chunks,
+                    "embeddings_hit": embeddings_hit,
+                }
+
+                # Enriquecer resultado retornado com métricas e deltas
+                result = dict(result or {})
+                result.setdefault("updated_files", updated_files)
+                result.setdefault("updated_chunks", updated_chunks)
+                result.setdefault("index_discovery_ms", index_discovery_ms)
+                result.setdefault("index_embed_ms", index_embed_ms)
+                result.setdefault("embeddings_hit", embeddings_hit)
+                # garantir index_dir como string serializável
+                try:
+                    result.setdefault("index_dir", str(self.index_dir))
+                except Exception:
+                    result.setdefault("index_dir", "")
+
+                result.setdefault("updated_files", updated_files)
+                result.setdefault("updated_chunks", updated_chunks)
+                result.setdefault("index_discovery_ms", index_discovery_ms)
+                result.setdefault("index_embed_ms", index_embed_ms)
+                result.setdefault("embeddings_hit", embeddings_hit)
+                # garantir index_dir como string serializável
+                try:
+                    result.setdefault("index_dir", str(self.index_dir))
+                except Exception:
+                    result.setdefault("index_dir", "")
+
                 return result
 
             except Exception as e:
                 logger.info(f"❌ Erro na indexação: {e}")
-                return {"files_indexed": 0, "chunks": 0, "error": str(e)}
+                try:
+                    index_dir_str = str(self.index_dir)
+                except Exception:
+                    index_dir_str = ""
+                return {"files_indexed": 0, "chunks": 0, "error": str(e), "index_dir": index_dir_str}
 
     def load_index(self):
         """Carrega o índice e atualiza self.chunks"""

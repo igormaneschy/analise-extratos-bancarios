@@ -1,107 +1,276 @@
-# Sistema de Análise de Extratos Bancários + MCP System
+# Sistema de Análise de Extratos Bancários
 
-Este repositório contém:
-- Uma aplicação Python para análise automatizada de extratos bancários (PDF, Excel e CSV)
-- Um Servidor MCP autocontido (mcp_system) com indexação de código, busca híbrida (BM25 + semântica), empacotamento de contexto e memória de sessões
+Uma aplicação Python robusta e modular para análise automatizada de extratos bancários, desenvolvida com arquitetura limpa (Clean Architecture) e suporte a múltiplos formatos de arquivo.
 
-## Quick start
+## 🚀 Funcionalidades
 
-- Requisitos gerais: Python 3.11+
-- MCP: requer a biblioteca FastMCP instalada no ambiente do servidor
+### 📊 Análise Completa de Extratos
+- **Extração automática** de transações de PDF, Excel e CSV
+- **Categorização inteligente** de transações baseada em palavras-chave
+- **Cálculo de saldos** e fluxos financeiros
+- **Análise mensal** e por categoria
+- **Detecção automática de moeda** (EUR, USD, BRL, GBP, JPY, CHF, CAD, AUD)
 
-Aplicação (CLI) de análise:
-- Execute os testes ou comandos conforme sua automação local.
+### 📈 Relatórios e Insights
+- **Relatórios detalhados** em texto ou Markdown
+- **Alertas inteligentes** sobre padrões financeiros
+- **Insights automatizados** sobre gastos e economia
+- **Resumos mensais** e por categoria
+- **Interface CLI rica** com Rich para melhor experiência
 
-Servidor MCP:
-- O servidor MCP é carregado como módulo Python: `mcp_system.mcp_server_enhanced`
-- O cliente MCP/host é responsável por inicializar o servidor; durante o startup você deverá ver logs no stderr, por exemplo:
-  - `[mcp_server_enhanced] 🚀 Iniciando indexação automática inicial...`
-  - `[mcp_server_enhanced] ✅ Indexação inicial concluída`
-  - `[mcp_server_enhanced] 🧠 Memory DB em uso: <...>/mcp_system/.mcp_memory/memory.db`
+### 🔧 Arquitetura Modular
+- **Arquitetura Limpa** (Clean Architecture) com separação clara de responsabilidades
+- **Interfaces bem definidas** para extensibilidade
+- **Injeção de dependências** para testabilidade
+- **Suporte a múltiplos leitores** (PDF, Excel, CSV)
+- **Categorizadores plugáveis** para diferentes regras
 
-## Arquitetura e auto-contenção do MCP
+## 🏗️ Arquitetura
 
-Todos os artefatos do servidor MCP ficam dentro da pasta `mcp_system` por padrão:
-- `mcp_system/.mcp_index/` — índices e métricas (ex.: `metrics_index.csv`, `metrics_context.csv`)
-- `mcp_system/.mcp_memory/` — memória (SQLite) contendo a tabela `session_summaries`
-- `mcp_system/.emb_cache/` — cache de embeddings/modelos (quando aplicável)
+O projeto segue os princípios da Clean Architecture:
 
-Mecanismos de proteção:
-- O indexador ignora por padrão (`DEFAULT_EXCLUDE`): `**/.mcp_index/**`, `**/.mcp_memory/**`, `**/.emb_cache/**`, além de diretórios comuns (`.git`, `node_modules`, `dist`, `build`, `.venv`, `__pycache__`)
-- O file watcher também filtra eventos provenientes desses diretórios internos para evitar reindexação de artefatos do próprio servidor
+```
+src/
+├── domain/           # Regras de negócio e modelos
+│   ├── models.py     # Entidades (Transaction, BankStatement, etc.)
+│   ├── interfaces.py # Contratos abstratos
+│   └── exceptions.py # Exceções de domínio
+├── application/      # Casos de uso
+│   └── use_cases.py  # Lógica de aplicação
+├── infrastructure/   # Implementações concretas
+│   ├── readers/      # Leitores de arquivos (PDF, Excel, CSV)
+│   ├── analyzers/    # Analisadores de extratos
+│   ├── categorizers/ # Categorizadores de transações
+│   └── reports/      # Geradores de relatórios
+└── utils/            # Utilitários
+    └── currency_utils.py # Manipulação de moedas
+```
 
-## Variáveis de ambiente (MCP)
+## 📋 Pré-requisitos
 
-- `INDEX_ROOT` (default: diretório pai de `mcp_system`)
-  - Raiz do projeto a ser indexado. Não precisa ficar dentro de `mcp_system`; apenas os artefatos do servidor ficam.
-- `INDEX_DIR` (default: `mcp_system/.mcp_index`)
-  - Onde ficam os índices e métricas.
-- `EMBEDDINGS_CACHE_DIR` (default: `mcp_system/.emb_cache`)
-  - Diretório de cache para modelos (HuggingFace/Sentence-Transformers). O servidor também ajusta `SENTENCE_TRANSFORMERS_HOME`, `HF_HOME`, `HUGGINGFACE_HUB_CACHE` quando esse diretório é usado.
-- `AUTO_INDEX_ON_START` (default: `1`)
-  - Indexar automaticamente no startup.
-- `AUTO_INDEX_PATHS` (default: `.`)
-  - Caminhos (separados por `os.pathsep`) relativos a `INDEX_ROOT` a serem indexados no startup.
-- `AUTO_INDEX_RECURSIVE` (default: `1`)
-  - Indexação recursiva.
-- `AUTO_ENABLE_SEMANTIC` (default: `1`)
-  - Ativa re-rank semântico na busca (quando disponível).
-- `AUTO_START_WATCHER` (default: `1`)
-  - Inicia o file watcher após indexação.
-- `MEMORY_DIR` (opcional)
-  - Se definido, ajusta o diretório da memória. Pode ser relativo a `mcp_system` ou absoluto. Padrão é `mcp_system/.mcp_memory`.
+- Python 3.8+
+- pip para gerenciamento de dependências
 
-## Inicialização e logs (MCP)
+## 🛠️ Instalação
 
-Fluxo no startup do servidor MCP:
-1) Indexação automática (se habilitada)
-2) Inicialização da memória (se disponível) e registro de um resumo da indexação inicial
-3) Início do watcher (se habilitado)
+1. **Clone o repositório:**
+   ```bash
+   git clone <url-do-repositorio>
+   cd analise-extratos-bancarios
+   ```
 
-Logs esperados:
-- Disponibilidade da memória:
-  - `[mcp_server_enhanced] 🧠 MemoryStore disponível`
-  - ou (quando executado em contexto de pacote): `🧠 MemoryStore disponível (import relativo)`
-  - em falhas: `⚠️ MemoryStore indisponível: abs=...; rel=...`
-- Caminho do DB:
-  - `[mcp_server_enhanced] 🧠 Memory DB em uso: <...>/mcp_system/.mcp_memory/memory.db`
+2. **Instale as dependências:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Ferramentas MCP expostas
+3. **Instalação opcional para PDFs complexos:**
+   ```bash
+   pip install PyPDF2 pdfplumber
+   ```
 
-- `index_path` — Indexa um caminho
-- `search_code` — Busca híbrida (BM25 + semântica quando disponível)
-- `context_pack` — Cria pacote de contexto com trechos relevantes
-- `auto_index` — Controla sistema de auto-indexação (start/stop/status)
-- `get_stats` — Estatísticas do indexador
-- `cache_management` — Gerencia caches (ex.: limpar cache de embeddings)
-- `where_we_stopped` — Resumo de últimos passos, próximos passos, bloqueios e pistas
+## 📖 Uso
 
-## Scripts utilitários (MCP)
+### Comando Básico
 
-Executando via módulo Python:
+```bash
+python main.py analyze caminho/para/extrato.pdf
+```
 
-- Listar estatísticas:
-  - `python -m mcp_system.scripts.get_stats`
-- Resumir métricas (lê CSVs dentro de `mcp_system/.mcp_index`):
-  - `python -m mcp_system.scripts.summarize_metrics`
-- Visualizar métricas (quando aplicável):
-  - `python -m mcp_system.scripts.visual_metrics`
-- Dump da memória (sem sqlite3 CLI):
-  - JSON: `python -m mcp_system.scripts.memory_dump --limit 20`
-  - Tabela: `python -m mcp_system.scripts.memory_dump --limit 20 --table`
-  - Filtros: `--project`, `--scope`, `--contains`
-  - Diretório alternativo de memória: `--memory-dir <path>`
+### Opções Disponíveis
 
-## Resolução de problemas
+```bash
+python main.py analyze --help
+```
 
-- Não aparece o log do DB de memória
-  - Verifique se há log de disponibilidade do MemoryStore
-  - Se indisponível: confirme dependências do Python e que o módulo `mcp_system` está acessível (o servidor tenta import absoluto e relativo)
-- Erro no watcher
-  - Confirme que diretórios internos (`.mcp_index`, `.mcp_memory`, `.emb_cache`) estão sendo filtrados
-- Busca semântica inativa
-  - O servidor funciona com BM25 puro; a reordenação semântica é ativada quando bibliotecas de embeddings estão disponíveis
+- `--output, -o`: Caminho para salvar o relatório
+- `--format, -f`: Formato do relatório (text/markdown)
+- `--help`: Mostra ajuda
 
-## Sobre a aplicação de análise de extratos
+### Exemplos de Uso
 
-A aplicação extrai e analisa transações de PDF/Excel/CSV, calcula saldos e pode categorizar gastos. Consulte os testes e exemplos em `data/samples` para uso básico.
+#### Analisar PDF
+```bash
+python main.py analyze data/samples/20250507_Extrato_Integrado.pdf
+```
+
+#### Analisar Excel
+```bash
+python main.py analyze data/samples/extmovs_bpi2108102947.xlsx
+```
+
+#### Analisar CSV
+```bash
+python main.py analyze data/samples/extrato_exemplo.csv
+```
+
+#### Salvar relatório em arquivo
+```bash
+python main.py analyze extrato.pdf --output relatorio.txt
+```
+
+#### Gerar relatório em Markdown
+```bash
+python main.py analyze extrato.pdf --format markdown --output relatorio.md
+```
+
+### Criar Arquivo de Instruções
+
+```bash
+python main.py sample instrucoes.md
+```
+
+## 📄 Formatos Suportados
+
+### CSV
+Estrutura esperada:
+```csv
+data,descricao,valor,saldo
+01/01/2023,Salário Janeiro,2500.00,2500.00
+02/01/2023,Supermercado,-150.50,2349.50
+```
+
+**Colunas obrigatórias:**
+- `data` (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD)
+- `descricao` (descrição da transação)
+- `valor` (positivo para receitas, negativo para despesas)
+
+**Colunas opcionais:**
+- `saldo` (saldo após transação)
+- `conta` (número da conta)
+
+### Excel
+- Suporte a múltiplas planilhas
+- Detecção automática de cabeçalhos
+- Compatível com .xlsx e .xls
+
+### PDF
+- Extração de texto estruturado
+- Suporte a PDFs de bancos europeus
+- Detecção de tabelas e dados tabulares
+
+## 💰 Moedas Suportadas
+
+- **EUR** (€) - Euro
+- **USD** ($) - Dólar Americano
+- **BRL** (R$) - Real Brasileiro
+- **GBP** (£) - Libra Esterlina
+- **JPY** (¥) - Iene Japonês
+- **CHF** (CHF) - Franco Suíço
+- **CAD** (C$) - Dólar Canadense
+- **AUD** (A$) - Dólar Australiano
+
+## 📊 Categorias de Transação
+
+- **ALIMENTACAO**: Alimentação e restaurantes
+- **TRANSPORTE**: Transporte público, combustível
+- **MORADIA**: Aluguel, condomínio, manutenção
+- **SAUDE**: Médicos, medicamentos, seguros
+- **EDUCACAO**: Cursos, livros, mensalidades
+- **LAZER**: Entretenimento, hobbies
+- **COMPRAS**: Compras gerais
+- **SERVICOS**: Serviços diversos
+- **TRANSFERENCIA**: Transferências entre contas
+- **INVESTIMENTO**: Investimentos e aplicações
+- **SALARIO**: Receitas salariais
+- **OUTROS**: Outras categorias
+
+## 🧪 Testes
+
+Execute os testes com:
+
+```bash
+# Todos os testes
+pytest
+
+# Com cobertura
+pytest --cov=src --cov-report=html
+
+# Testes específicos
+pytest tests/unit/test_models.py
+```
+
+## 📁 Estrutura do Projeto
+
+```
+├── main.py                 # Ponto de entrada CLI
+├── requirements.txt        # Dependências Python
+├── pytest.ini            # Configuração de testes
+├── data/
+│   └── samples/          # Arquivos de exemplo
+├── src/
+│   ├── domain/           # Camada de domínio
+│   ├── application/      # Casos de uso
+│   ├── infrastructure/   # Implementações
+│   └── utils/            # Utilitários
+├── tests/                # Testes automatizados
+└── scripts/              # Scripts auxiliares
+```
+
+## 🔧 Desenvolvimento
+
+### Adicionar Novo Leitor
+
+1. Implemente a interface `StatementReader` em `src/domain/interfaces.py`
+2. Crie classe concreta em `src/infrastructure/readers/`
+3. Registre no `ExtractAnalyzer` em `use_cases.py`
+
+### Adicionar Nova Categoria
+
+1. Adicione ao enum `TransactionCategory` em `models.py`
+2. Atualize o categorizador em `categorizers/`
+
+### Adicionar Suporte a Nova Moeda
+
+1. Adicione símbolo em `CURRENCY_SYMBOLS` em `currency_utils.py`
+2. Adicione padrão de detecção em `CURRENCY_PATTERNS`
+
+## 📈 Exemplos de Saída
+
+### Resumo no Terminal
+```
+✓ Análise concluída!
+
+📊 Total de transações: 45
+💰 Receitas: € 3.250,00
+💸 Despesas: € 2.180,50
+📈 Saldo: € 1.069,50
+```
+
+### Alertas
+```
+⚠️  Alertas
+   Atenção: Despesas superaram receitas em € 150,00
+   ⚠️ 5 transações não foram categorizadas automaticamente
+   ⚠️ Gastos com ALIMENTACAO representam 35.2% do total
+```
+
+### Insights
+```
+💡 Insights
+   Maior categoria de gastos: ALIMENTACAO (€ 768,50 - 35.2%)
+   💡 Média diária de gastos: € 72,68
+   💡 68% das suas despesas são menores que € 45,00
+```
+
+## 🤝 Contribuição
+
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/nova-feature`)
+3. Commit suas mudanças (`git commit -am 'Adiciona nova feature'`)
+4. Push para a branch (`git push origin feature/nova-feature`)
+5. Abra um Pull Request
+
+## 📄 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo LICENSE para mais detalhes.
+
+## 🆘 Suporte
+
+Para suporte ou dúvidas:
+- Abra uma issue no GitHub
+- Consulte a documentação em `python main.py sample instrucoes.md`
+
+---
+
+**Desenvolvido com ❤️ para facilitar a análise financeira pessoal**
