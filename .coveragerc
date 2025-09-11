@@ -1,6 +1,5 @@
 [run]
 omit =
-    mcp_system/*
     */__init__.py
     */__pycache__/*
     .venv/*

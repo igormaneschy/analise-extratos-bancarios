@@ -12,19 +12,20 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 import os
 from datetime import datetime, timedelta
 
+
 def create_sample_statement():
     """Cria um extrato bancário de exemplo em PDF."""
-    
+
     # Criar diretório se não existir
     os.makedirs("data/samples", exist_ok=True)
-    
+
     # Nome do arquivo
     filename = "data/samples/extrato_exemplo.pdf"
-    
+
     # Criar documento
     doc = SimpleDocTemplate(filename, pagesize=A4)
     story = []
-    
+
     # Estilos
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -34,30 +35,30 @@ def create_sample_statement():
         textColor=colors.HexColor('#003366'),
         alignment=TA_CENTER
     )
-    
+
     # Cabeçalho
     story.append(Paragraph("BANCO EXEMPLO S.A.", title_style))
     story.append(Spacer(1, 12))
     story.append(Paragraph("Extrato de Conta Corrente", styles['Heading2']))
     story.append(Spacer(1, 12))
-    
+
     # Informações da conta
     info_data = [
         ["Agência:", "1234", "Conta:", "56789-0"],
         ["Cliente:", "João da Silva", "CPF:", "123.456.789-00"],
         ["Período:", "01/08/2025 a 31/08/2025", "", ""]
     ]
-    
+
     info_table = Table(info_data, colWidths=[60, 120, 60, 120])
     info_table.setStyle(TableStyle([
         ('FONTSIZE', (0, 0), (-1, -1), 10),
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
         ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
     ]))
-    
+
     story.append(info_table)
     story.append(Spacer(1, 20))
-    
+
     # Saldo anterior
     story.append(Paragraph("Saldo Anterior (31/07/2025): € 2.500,00", styles['Normal']))
     story.append(Spacer(1, 12))
@@ -82,12 +83,23 @@ def create_sample_statement():
         ["30/08", "RENDIMENTO POUPANCA", "€ 15,43 C", "€ 6.276,10"],
     ]
 
+    # Helper to safely get a color: prefer named attribute if present, otherwise fall back to HexColor
+    def _safe_color(name, fallback_hex):
+        attr = getattr(colors, name, None)
+        if attr:
+            return attr
+        # Some reportlab fakes provide HexColor; others provide constants. Try HexColor when available.
+        hexfunc = getattr(colors, 'HexColor', None)
+        if callable(hexfunc):
+            return hexfunc(fallback_hex)
+        return fallback_hex
+
     # Criar tabela de transações
     trans_table = Table(transactions, colWidths=[50, 200, 80, 80])
     trans_table.setStyle(TableStyle([
         # Cabeçalho
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('BACKGROUND', (0, 0), (-1, 0), _safe_color('grey', '#808080')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), _safe_color('whitesmoke', '#F5F5F5')),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 10),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -99,10 +111,10 @@ def create_sample_statement():
         ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
 
         # Linhas alternadas
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [_safe_color('white', '#FFFFFF'), _safe_color('lightgrey', '#D3D3D3')]),
 
         # Bordas
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('GRID', (0, 0), (-1, -1), 0.5, _safe_color('black', '#000000')),
     ]))
 
     story.append(trans_table)
@@ -131,6 +143,7 @@ def create_sample_statement():
     doc.build(story)
     print(f"✅ PDF de exemplo criado: {filename}")
     return filename
+
 
 if __name__ == "__main__":
     create_sample_statement()
