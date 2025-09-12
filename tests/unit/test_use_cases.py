@@ -91,7 +91,7 @@ def test_extract_analyzer_analyze_file(monkeypatch):
 def test_extract_analyzer_analyze_and_print(monkeypatch, capsys):
     analyzer = ExtractAnalyzer()
 
-    monkeypatch.setattr(analyzer, "analyze_file", lambda file_path: ("result", "report"))
+    monkeypatch.setattr(analyzer, "analyze_file", lambda file_path: ("result", "report", "statement"))
 
     result = analyzer.analyze_and_print("data/samples/20250507_Extrato_Integrado.pdf")
 

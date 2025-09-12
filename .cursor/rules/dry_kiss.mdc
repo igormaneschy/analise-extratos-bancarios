@@ -7,6 +7,22 @@ alwaysApply: true
 ## Objetivo
 Evitar duplicação de lógica e manter o código simples e legível.
 
+## 🚀 Quick Reference
+
+### **Princípios:**
+- **DRY**: Don't Repeat Yourself - Evite duplicação
+- **KISS**: Keep It Simple, Stupid - Mantenha simples
+- **YAGNI**: You Aren't Gonna Need It - Não implemente antes de precisar
+
+### **Quando Aplicar:**
+- ✅ **DRY**: Lógica duplicada em 3+ lugares
+- ✅ **KISS**: Código difícil de entender
+- ✅ **YAGNI**: Funcionalidades "que podem ser úteis"
+
+### **Conflitos Comuns:**
+- **DRY vs KISS**: Abstração excessiva vs Simplicidade
+- **DRY vs YAGNI**: Reutilização vs Necessidade real
+
 ---
 
 ## 1. DRY — Don't Repeat Yourself
@@ -14,17 +30,59 @@ Não repita lógica em diferentes lugares.
 
 ✅ Correto:
 ```python
-def calculate_tax(amount, rate):
+def calculate_tax(amount: Decimal, rate: Decimal) -> Decimal:
+    """Calcula imposto sobre um valor."""
     return amount * rate
+
+def calculate_vat(amount: Decimal) -> Decimal:
+    return calculate_tax(amount, Decimal("0.23"))
+
+def calculate_service_tax(amount: Decimal) -> Decimal:
+    return calculate_tax(amount, Decimal("0.23"))
 ```
 
 ❌ Errado:
 ```python
-def calculate_vat(amount):
-    return amount * 0.23
+def calculate_vat(amount: Decimal) -> Decimal:
+    return amount * Decimal("0.23")
 
-def calculate_service_tax(amount):
-    return amount * 0.23
+def calculate_service_tax(amount: Decimal) -> Decimal:
+    return amount * Decimal("0.23")
+
+def calculate_income_tax(amount: Decimal) -> Decimal:
+    return amount * Decimal("0.15")
+```
+
+### **Exemplo Complexo - Parsing de Valores:**
+```python
+# ✅ CORRETO - Lógica centralizada
+class AmountParser:
+    @staticmethod
+    def parse_amount(value: str) -> Decimal:
+        """Parse centralizado para todos os tipos de valor."""
+        cleaned = re.sub(r'[^\d.,+-]', '', str(value))
+        if ',' in cleaned and '.' in cleaned:
+            cleaned = cleaned.replace('.', '').replace(',', '.')
+        elif ',' in cleaned:
+            cleaned = cleaned.replace(',', '.')
+        return Decimal(cleaned)
+
+# ❌ ERRADO - Lógica duplicada
+def parse_transaction_amount(value: str) -> Decimal:
+    cleaned = re.sub(r'[^\d.,+-]', '', str(value))
+    if ',' in cleaned and '.' in cleaned:
+        cleaned = cleaned.replace('.', '').replace(',', '.')
+    elif ',' in cleaned:
+        cleaned = cleaned.replace(',', '.')
+    return Decimal(cleaned)
+
+def parse_balance_amount(value: str) -> Decimal:
+    cleaned = re.sub(r'[^\d.,+-]', '', str(value))
+    if ',' in cleaned and '.' in cleaned:
+        cleaned = cleaned.replace('.', '').replace(',', '.')
+    elif ',' in cleaned:
+        cleaned = cleaned.replace(',', '.')
+    return Decimal(cleaned)
 ```
 
 ---
@@ -54,3 +112,76 @@ Não implemente funcionalidades antes de precisar.
 
 ❌ Errado:
 - Criar classes genéricas para cenários que talvez nunca aconteçam.
+
+---
+
+## ⚖️ Resolvendo Conflitos
+
+### **DRY vs KISS - Quando Abstrair?**
+
+#### **✅ Abstrair (DRY):**
+```python
+# Lógica duplicada em 3+ lugares
+class BaseStatementReader:
+    def _parse_amount(self, value: str) -> Decimal:
+        # Lógica comum de parsing
+        pass
+```
+
+#### **❌ Não Abstrair (KISS):**
+```python
+# Lógica similar mas com contextos diferentes
+def parse_transaction_amount(value: str) -> Decimal:
+    # Parsing específico para transações
+    pass
+
+def parse_balance_amount(value: str) -> Decimal:
+    # Parsing específico para saldos
+    pass
+```
+
+### **DRY vs YAGNI - Quando Reutilizar?**
+
+#### **✅ Reutilizar (DRY):**
+- Lógica já duplicada em 3+ lugares
+- Funcionalidade estável e bem testada
+- Mudanças futuras são prováveis
+
+#### **❌ Não Reutilizar (YAGNI):**
+- Lógica similar mas contextos diferentes
+- Funcionalidade ainda em evolução
+- Mudanças futuras são incertas
+
+### **Decisão: DRY, KISS ou YAGNI?**
+
+#### **Use DRY quando:**
+- ✅ Lógica idêntica em 3+ lugares
+- ✅ Mudanças precisam ser sincronizadas
+- ✅ Funcionalidade está estável
+
+#### **Use KISS quando:**
+- ✅ Código está difícil de entender
+- ✅ Abstração não agrega valor
+- ✅ Simplicidade é mais importante
+
+#### **Use YAGNI quando:**
+- ✅ Funcionalidade não é necessária agora
+- ✅ Requisitos futuros são incertos
+- ✅ Código pode ser refatorado depois
+
+### **Métricas de Qualidade:**
+- **DRY**: < 5% de código duplicado
+- **KISS**: Complexidade ciclomática < 10
+- **YAGNI**: < 20% de código não utilizado
+
+### **Ferramentas de Detecção:**
+```bash
+# Detectar duplicação
+duplo src/ --html duplo-report.html
+
+# Medir complexidade
+radon cc src/ --min B
+
+# Encontrar código não utilizado
+vulture src/ --min-confidence 60
+```

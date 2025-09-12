@@ -15,17 +15,17 @@ from src.domain.models import BankStatement, Transaction, TransactionType
 from src.domain.interfaces import StatementReader
 from src.domain.exceptions import ParsingError
 from src.utils.currency_utils import CurrencyUtils
+from src.infrastructure.readers.base_reader import BaseStatementReader
 
 
 logger = logging.getLogger(__name__)
 
 
-class ExcelStatementReader(StatementReader):
+class ExcelStatementReader(BaseStatementReader):
     """Leitor de extratos bancários em formato Excel."""
 
     def __init__(self):
-        self.currency = "EUR"  # Será detectado automaticamente
-        self.bank_name: Optional[str] = None
+        super().__init__()
         # Debug e mapeamentos externos
         self._external_mappings = None
         self._debug_enabled = os.getenv("EXCEL_READER_DEBUG", "").lower() in {"1", "true", "yes", "on"}
@@ -227,50 +227,24 @@ class ExcelStatementReader(StatementReader):
             norm = self._normalize_text(name)
             if norm in columns_lower:
                 return df.columns[columns_lower.index(norm)]
-        # 2) Substring: candidato dentro do nome da coluna
+        # 2) Substring: candidato dentro do nome da coluna (mas não vice-versa)
         for name in possible_names:
             norm = self._normalize_text(name)
             for i, col_norm in enumerate(columns_lower):
-                if norm and norm in col_norm:
+                # Evita correspondências parciais que podem causar confusão
+                # Especialmente evita "valor" em "data valor"
+                if (norm and len(norm) > 3 and norm in col_norm and 
+                    col_norm != norm and not (norm == "valor" and "data" in col_norm)):
                     return df.columns[i]
-        # 3) Substring invertido: nome da coluna dentro do candidato
+        # 3) Substring invertido: nome da coluna dentro do candidato (mas não vice-versa)
         for name in possible_names:
             norm = self._normalize_text(name)
             for i, col_norm in enumerate(columns_lower):
-                if col_norm and col_norm in norm:
+                if (col_norm and len(col_norm) > 3 and col_norm in norm and 
+                    col_norm != norm and not (col_norm == "valor" and "data" in norm)):
                     return df.columns[i]
         return None
 
-    def _parse_date(self, date_str: str):
-        formats = ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%d-%m-%y"]
-        for fmt in formats:
-            try:
-                return datetime.strptime(date_str, fmt)
-            except Exception:
-                pass
-        try:
-            return pd.to_datetime(date_str).to_pydatetime()
-        except Exception:
-            # Em último caso, retorna a string original
-            return date_str
-
-    def _parse_amount(self, amount_str: str) -> tuple[Decimal, TransactionType]:
-        """Normaliza valores: retorna Decimal positivo e tipo com base no sinal."""
-        cleaned = str(amount_str).strip().replace(" ", "")
-        is_negative = False
-        if cleaned.startswith("-") or (cleaned.startswith("(") and cleaned.endswith(")")):
-            is_negative = True
-            cleaned = cleaned.replace("-", "").replace("(", "").replace(")", "")
-        cleaned = re.sub(r"[^\d,.-]", "", cleaned)
-        if "," in cleaned and "." in cleaned:
-            cleaned = cleaned.replace(".", "").replace(",", ".")
-        elif "," in cleaned:
-            cleaned = cleaned.replace(",", ".")
-        amount = Decimal(cleaned)
-        if is_negative:
-            amount = -amount
-        ttype = TransactionType.CREDIT if amount >= 0 else TransactionType.DEBIT
-        return abs(amount), ttype
 
     def _parse_balance(self, balance_str: str) -> Optional[Decimal]:
         if balance_str is None:
@@ -370,9 +344,13 @@ class ExcelStatementReader(StatementReader):
                 if amount_raw == "" or amount_raw.lower() in ["nan", "none", "null"]:
                     continue
 
-                amount, ttype = self._parse_amount(amount_raw)
+                amount = self._parse_amount(amount_raw)
+                ttype = self._determine_transaction_type(amount, str(row[description_col]).strip())
                 date_val = self._parse_date(str(row[date_col]).strip())
                 description = str(row[description_col]).strip()
+
+                # Armazena o valor absoluto na transação
+                amount = abs(amount)
 
                 transaction = Transaction(
                     date=date_val,
@@ -402,22 +380,6 @@ class ExcelStatementReader(StatementReader):
                     if re.match(r"\d{1,2}-\d{7,}\.??\d*", val):
                         return val
         return ""
-
-    def _extract_start_date(self, transactions: List[Transaction]) -> Optional[datetime]:
-        if not transactions:
-            return None
-        try:
-            return min(t.date for t in transactions)
-        except Exception:
-            return None
-
-    def _extract_end_date(self, transactions: List[Transaction]) -> Optional[datetime]:
-        if not transactions:
-            return None
-        try:
-            return max(t.date for t in transactions)
-        except Exception:
-            return None
 
     def _extract_initial_balance(self, df) -> Decimal:
         """Extrai saldo inicial procurando por 'Saldo Disponível' e lendo o valor logo abaixo na mesma coluna (como em testes)."""

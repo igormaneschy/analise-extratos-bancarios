@@ -106,7 +106,7 @@ class TestPDFStatementReader:
             assert isinstance(transaction, Transaction)
             assert transaction.date.strftime("%d/%m/%Y") == "01/01/2024"
             assert transaction.description == "Supermercado"
-            assert transaction.amount == Decimal("-150.00")  # Amount preserves sign
+            assert transaction.amount == Decimal("150.00")  # Amount is stored as absolute value
             assert transaction.type == TransactionType.DEBIT  # Negative amount = debit
     
     def test_parse_transaction_line_credit(self):

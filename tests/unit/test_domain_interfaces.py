@@ -14,7 +14,6 @@ from src.domain.models import BankStatement, Transaction, AnalysisResult, Transa
 # Importando as interfaces
 from src.domain.interfaces import (
     StatementReader,
-    TransactionParser,
     StatementAnalyzer,
     ReportGenerator,
     TransactionCategorizer
@@ -38,13 +37,6 @@ class TestStatementReaderImpl(StatementReader):
     
     def read(self, file_path: Path) -> BankStatement:
         return BankStatement(transactions=[])
-
-
-class TestTransactionParserImpl(TransactionParser):
-    """Implementação de teste para TransactionParser."""
-    
-    def parse(self, raw_data: str) -> List[Transaction]:
-        return []
 
 
 class TestStatementAnalyzerImpl(StatementAnalyzer):
@@ -116,24 +108,6 @@ class TestStatementReaderInterface:
         # Verifica se não é abstrata (pode ser instanciada)
         reader = CSVStatementReader()
         assert isinstance(reader, StatementReader)
-
-
-class TestTransactionParserInterface:
-    """Testes para a interface TransactionParser."""
-    
-    def test_transaction_parser_is_abstract(self):
-        """Verifica se TransactionParser é uma classe abstrata."""
-        # Verifica se é uma classe abstrata
-        assert hasattr(TransactionParser, '__abstractmethods__')
-        # Verifica se tem o método abstrato esperado
-        assert 'parse' in TransactionParser.__abstractmethods__
-    
-    def test_transaction_parser_implementation(self):
-        """Verifica se a implementação de teste funciona."""
-        impl = TestTransactionParserImpl()
-        result = impl.parse("test data")
-        assert isinstance(result, list)
-        assert len(result) == 0
 
 
 class TestStatementAnalyzerInterface:

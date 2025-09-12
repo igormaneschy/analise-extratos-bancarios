@@ -7,6 +7,21 @@ alwaysApply: true
 ## Objetivo
 Promover design modular, extensível e de fácil manutenção.
 
+## 🚀 Quick Reference
+
+### **Princípios SOLID:**
+- **S** - Single Responsibility: Uma classe, uma responsabilidade
+- **O** - Open/Closed: Aberto para extensão, fechado para modificação
+- **L** - Liskov Substitution: Subtipos substituem tipos base
+- **I** - Interface Segregation: Interfaces específicas e pequenas
+- **D** - Dependency Inversion: Dependa de abstrações, não implementações
+
+### **Quando Aplicar:**
+- ✅ **Sempre**: Em novos desenvolvimentos
+- ✅ **Refatoração**: Quando código está difícil de manter
+- ✅ **Extensibilidade**: Quando precisar adicionar funcionalidades
+- ⚠️ **Cuidado**: Em sistemas legados (aplicar gradualmente)
+
 ---
 
 ## 1. Single Responsibility Principle (SRP)
@@ -14,20 +29,31 @@ Cada classe/módulo deve ter uma única responsabilidade.
 
 ✅ Correto:
 ```python
-class InvoicePrinter:
-    def print(self, invoice): ...
+class BankStatementReader:
+    def read(self, file_path: Path) -> BankStatement: ...
 
-class InvoiceRepository:
-    def save(self, invoice): ...
+class TransactionCategorizer:
+    def categorize(self, transactions: List[Transaction]) -> List[Transaction]: ...
+
+class StatementAnalyzer:
+    def analyze(self, statement: BankStatement) -> AnalysisResult: ...
 ```
 
 ❌ Errado:
 ```python
-class InvoiceManager:
-    def save(self, invoice): ...
-    def print(self, invoice): ...
-    def send_email(self, invoice): ...
+class BankStatementProcessor:
+    def read(self, file_path: Path) -> BankStatement: ...
+    def categorize(self, transactions: List[Transaction]) -> List[Transaction]: ...
+    def analyze(self, statement: BankStatement) -> AnalysisResult: ...
+    def generate_report(self, analysis: AnalysisResult) -> str: ...
+    def send_email(self, report: str) -> None: ...
 ```
+
+### **Quando Aplicar SRP:**
+- ✅ Classe com mais de 200 linhas
+- ✅ Múltiplas razões para mudança
+- ✅ Dificuldade para testar
+- ✅ Responsabilidades não relacionadas
 
 ---
 
@@ -36,21 +62,38 @@ Entidades devem estar abertas para extensão, mas fechadas para modificação.
 
 ✅ Correto:
 ```python
-class DiscountStrategy:
-    def apply(self, amount): return amount
+class TransactionCategorizer:
+    def categorize(self, transaction: Transaction) -> TransactionCategory: ...
 
-class BlackFridayDiscount(DiscountStrategy):
-    def apply(self, amount): return amount * 0.5
+class KeywordCategorizer(TransactionCategorizer):
+    def categorize(self, transaction: Transaction) -> TransactionCategory:
+        # Lógica baseada em palavras-chave
+        pass
+
+class MLBasedCategorizer(TransactionCategorizer):
+    def categorize(self, transaction: Transaction) -> TransactionCategory:
+        # Lógica baseada em machine learning
+        pass
 ```
 
 ❌ Errado:
 ```python
-def apply_discount(type, amount):
-    if type == "blackfriday":
-        return amount * 0.5
-    elif type == "student":
-        return amount * 0.9
+def categorize_transaction(transaction: Transaction, method: str):
+    if method == "keyword":
+        # Lógica de palavras-chave
+        pass
+    elif method == "ml":
+        # Lógica de ML
+        pass
+    elif method == "rule_based":
+        # Lógica baseada em regras
+        pass
 ```
+
+### **Quando Aplicar OCP:**
+- ✅ Múltiplas implementações de uma funcionalidade
+- ✅ Necessidade de adicionar novos tipos sem modificar código existente
+- ✅ Diferentes algoritmos para a mesma operação
 
 ---
 
@@ -112,4 +155,65 @@ class SqlRepository(Repository):
 class Service:
     def __init__(self):
         self.repo = SqlRepository()  # Forte acoplamento
+```
+
+---
+
+## ⚖️ Trade-offs e Exceções
+
+### **Quando Quebrar os Princípios SOLID:**
+
+#### **1. SRP - Exceções Aceitáveis:**
+- **DTOs/Value Objects**: Podem ter múltiplas responsabilidades relacionadas
+- **Factories**: Podem criar e configurar objetos
+- **Facades**: Podem orquestrar múltiplas operações
+
+```python
+# ✅ Aceitável - DTO com múltiplas responsabilidades relacionadas
+@dataclass
+class BankStatement:
+    bank_name: str
+    account_number: str
+    transactions: List[Transaction]
+    
+    def get_total_credits(self) -> Decimal: ...
+    def get_total_debits(self) -> Decimal: ...
+    def get_balance_variation(self) -> Decimal: ...
+```
+
+#### **2. OCP - Quando Modificar é Melhor:**
+- **Bugs críticos**: Correções urgentes podem exigir modificação
+- **Performance**: Otimizações podem requerer mudanças internas
+- **Legacy code**: Refatoração gradual é preferível
+
+#### **3. LSP - Exceções Necessárias:**
+- **Abstract base classes**: Podem ter métodos abstratos
+- **Interface segregation**: Quebrar em interfaces menores
+
+#### **4. ISP - Interfaces Grandes Aceitáveis:**
+- **Core domain interfaces**: Interfaces fundamentais do domínio
+- **Framework interfaces**: Quando seguindo padrões estabelecidos
+
+#### **5. DIP - Dependências Concretas Aceitáveis:**
+- **Value objects**: Dependências de tipos primitivos
+- **Framework classes**: Dependências de bibliotecas estáveis
+- **Configuration**: Dependências de configuração
+
+### **Métricas de Conformidade:**
+- **SRP**: Classes com < 200 linhas, < 5 métodos públicos
+- **OCP**: < 10% de modificações em classes existentes por release
+- **LSP**: 100% dos testes passam com implementações substitutas
+- **ISP**: Interfaces com < 5 métodos públicos
+- **DIP**: > 80% das dependências são abstrações
+
+### **Ferramentas de Validação:**
+```bash
+# Verificar complexidade ciclomática
+radon cc src/ --min B
+
+# Verificar acoplamento
+vulture src/ --min-confidence 60
+
+# Verificar coesão
+pylint src/ --disable=all --enable=similarities
 ```

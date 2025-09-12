@@ -61,35 +61,17 @@ class ExtractAnalyzer:
     """Classe de fachada para simplificar o uso do sistema."""
 
     def __init__(self):
-        # Importa implementações concretas de leitores, categorizador e analyzer
-        # (mantemos importações diretas para componentes sem efeitos colaterais)
-        from src.infrastructure.readers.pdf_reader import PDFStatementReader
-        from src.infrastructure.readers.excel_reader import ExcelStatementReader
-        from src.infrastructure.readers.csv_reader import CSVStatementReader
-        from src.infrastructure.categorizers.keyword_categorizer import KeywordCategorizer
-        from src.infrastructure.analyzers.basic_analyzer import BasicStatementAnalyzer
-
-        # Inicializa componentes
-        self.pdf_reader = PDFStatementReader()
-        self.excel_reader = ExcelStatementReader()
-        self.csv_reader = CSVStatementReader()
-        self.categorizer = KeywordCategorizer()
-        self.analyzer = BasicStatementAnalyzer()
-
-        # Inicialização "lazy" do gerador de relatório para evitar problemas de import
-        # no momento de importação do módulo (evita ImportError por ordem de importação).
+        from src.application.factories import ComponentFactory
+        
+        # Inicializa componentes usando factory
+        self.readers = ComponentFactory.create_readers()
+        self.categorizer = ComponentFactory.create_categorizer()
+        self.analyzer = ComponentFactory.create_analyzer()
+        
+        # Inicialização "lazy" do gerador de relatório
         self.text_report = None
 
-        # Lista de leitores disponíveis
-        self.readers: List[StatementReader] = [
-            self.pdf_reader,
-            self.excel_reader,
-            self.csv_reader
-        ]
-
         # Cria um gerador de relatório "lazy" que delega para o TextReportGenerator
-        # apenas quando generate for chamado. Isso evita forçar a importação
-        # imediata e mantém a API de ReportGenerator.
         class LazyReportGenerator:
             def __init__(self, parent):
                 self._parent = parent
@@ -100,7 +82,7 @@ class ExtractAnalyzer:
 
         # Cria caso de uso com o primeiro leitor (será substituído dinamicamente)
         self.use_case = AnalyzeStatementUseCase(
-            reader=self.pdf_reader,
+            reader=self.readers[0],  # PDF reader por padrão
             categorizer=self.categorizer,
             analyzer=self.analyzer,
             report_generator=LazyReportGenerator(self),
@@ -108,11 +90,8 @@ class ExtractAnalyzer:
 
     def _get_appropriate_reader(self, file_path: str) -> StatementReader:
         """Retorna o leitor apropriado para o tipo de arquivo."""
-        file_path_obj = Path(file_path)
-        for reader in self.readers:
-            if reader.can_read(file_path_obj):
-                return reader
-        raise ValueError(f"Nenhum leitor disponível para o arquivo: {file_path}")
+        from src.application.factories import ComponentFactory
+        return ComponentFactory.get_appropriate_reader(file_path, self.readers)
 
     def analyze_file(
         self,
@@ -134,7 +113,7 @@ class ExtractAnalyzer:
         return result, report, reader.read(Path(file_path))
 
     def analyze_and_print(self, file_path: str):
-        result, report = self.analyze_file(file_path)
+        result, report, statement = self.analyze_file(file_path)
         print(report)
         return result
 

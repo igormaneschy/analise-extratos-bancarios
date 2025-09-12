@@ -25,6 +25,44 @@ Uma aplicação Python robusta e modular para análise automatizada de extratos 
 - **Suporte a múltiplos leitores** (PDF, Excel, CSV)
 - **Categorizadores plugáveis** para diferentes regras
 
+
+## 📋 Regras de Desenvolvimento
+
+Este projeto inclui um conjunto completo de regras de desenvolvimento que garantem qualidade, consistência e manutenibilidade do código.
+
+### **🎯 Regras Implementadas:**
+- 🏗️ **Clean Architecture**: Separação clara de responsabilidades e dependências
+- 🔧 **Princípios SOLID**: Design modular e extensível
+- 🎯 **DRY/KISS/YAGNI**: Código limpo e eficiente
+- 🧪 **Política de Testes**: Cobertura adequada e qualidade
+- 📝 **Histórico de Desenvolvimento**: Rastreabilidade e documentação
+
+### **🛠️ Ferramentas de Validação:**
+- **Validação automática** de conformidade com as regras
+- **Métricas de qualidade** e scores de conformidade
+- **Geração automática** de entradas no histórico
+- **Dashboard visual** de métricas
+
+### **🌍 Genericidade:**
+As regras são **95% genéricas** e podem ser reutilizadas em qualquer projeto com pequenos ajustes.
+
+**📚 Documentação:**
+- [Guia Completo das Ferramentas](scripts/README.md)
+- [Quick Start para Outros Projetos](QUICK_START_RULES.md)
+- [Regras Genéricas](rules_generic/)
+
+**🚀 Uso Rápido:**
+```bash
+# Validar conformidade
+python scripts/validate_rules.py
+
+# Calcular métricas
+python scripts/metrics.py
+
+# Gerar entrada no histórico
+./scripts/generate_history_entry.sh feat "Nova funcionalidade"
+```
+
 ## 🏗️ Arquitetura
 
 O projeto segue os princípios da Clean Architecture:
@@ -151,7 +189,7 @@ data,descricao,valor,saldo
 
 ## 💰 Moedas Suportadas
 
-- **EUR** (€) - Euro
+- **EUR** (€) - Euro ( deve ser a moeda padrão)
 - **USD** ($) - Dólar Americano
 - **BRL** (R$) - Real Brasileiro
 - **GBP** (£) - Libra Esterlina

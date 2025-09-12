@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-09-12T11:45:52.929153",
+  "clean_architecture_score": 100.0,
+  "solid_score": 86.20689655172414,
+  "dry_kiss_score": 70.0,
+  "testing_score": 82,
+  "dev_history_score": 100,
+  "overall_score": 87.64137931034483,
+  "metrics": {
+    "clean_architecture_score": 100.0,
+    "solid_score": 86.20689655172414,
+    "dry_kiss_score": 70.0,
+    "test_coverage": 82,
+    "dev_history_score": 100,
+    "overall_score": 87.64137931034483
+  }
+}

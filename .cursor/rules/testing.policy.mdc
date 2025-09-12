@@ -7,8 +7,43 @@ alwaysApply: true
 ## Objetivo
 Garantir cobertura adequada de testes para todas as alterações de código, mantendo qualidade e confiabilidade do sistema.
 
-## Regras Principais
+## 🚀 Quick Start
 
+### **Comandos Essenciais:**
+```bash
+# Executar todos os testes
+python -m pytest tests/unit/ -v
+
+# Executar com cobertura
+python -m pytest tests/unit/ --cov=src --cov-report=term-missing
+
+# Executar teste específico
+python -m pytest tests/unit/test_models.py::test_transaction_creation -v
+
+# Executar com debug
+python -m pytest tests/unit/ -v -s --tb=short
+```
+
+### **Estrutura de Teste (AAA Pattern):**
+```python
+def test_function_should_return_expected_result():
+    # Arrange - Preparar dados
+    input_data = {"key": "value"}
+    expected_result = "expected"
+    
+    # Act - Executar função
+    result = function_under_test(input_data)
+    
+    # Assert - Verificar resultado
+    assert result == expected_result
+```
+
+### **Cobertura Mínima:**
+- **Código novo**: 80%
+- **Código crítico**: 90%
+- **Funções de utilidade**: 100%
+
+## Regras Principais
 
 ## Sempre na execução dos teste pedir para executar o comando( mostrar o comando ) e informar a saida. 
 
@@ -70,19 +105,79 @@ def test_function_should_return_expected_result():
 ## Testes Específicos do Projeto
 
 ### **Para processamento de PDFs:**
-- Teste com PDFs válidos e inválidos
-- Teste de extração de dados específicos
-- Teste de tratamento de erros
+```python
+def test_pdf_reader_valid_file():
+    """Testa leitura de PDF válido."""
+    reader = PDFStatementReader()
+    statement = reader.read("data/samples/20250507_Extrato_Integrado.pdf")
+    
+    assert statement.bank_name == "Banco BPI"
+    assert len(statement.transactions) > 0
+    assert statement.currency == "EUR"
+
+def test_pdf_reader_invalid_file():
+    """Testa leitura de PDF inválido."""
+    reader = PDFStatementReader()
+    
+    with pytest.raises(ParsingError):
+        reader.read("invalid_file.pdf")
+```
 
 ### **Para processamento de Excel:**
-- Teste com diferentes formatos de planilha
-- Teste de validação de dados
-- Teste de conversão de tipos
+```python
+def test_excel_reader_different_formats():
+    """Testa diferentes formatos de planilha."""
+    reader = ExcelStatementReader()
+    
+    # Teste com formato BPI
+    statement = reader.read("data/samples/extmovs_bpi2108102947.xlsx")
+    assert statement.bank_name == "Banco BPI"
+    
+    # Teste com formato genérico
+    statement = reader.read("data/samples/generic_format.xlsx")
+    assert len(statement.transactions) > 0
+
+def test_excel_reader_data_validation():
+    """Testa validação de dados."""
+    reader = ExcelStatementReader()
+    
+    # Teste com dados malformados
+    with pytest.raises(ParsingError):
+        reader.read("data/samples/malformed_data.xlsx")
+```
 
 ### **Para categorização:**
-- Teste de regras de classificação
-- Teste de padrões de transação
-- Teste de casos extremos
+```python
+def test_transaction_categorization():
+    """Testa categorização de transações."""
+    categorizer = KeywordCategorizer()
+    
+    # Teste com transação de supermercado
+    transaction = Transaction(
+        date=datetime.now(),
+        description="SUPERMERCADO CONTINENTE",
+        amount=Decimal("50.00"),
+        type=TransactionType.DEBIT
+    )
+    
+    categorized = categorizer.categorize([transaction])
+    assert categorized[0].category == TransactionCategory.ALIMENTACAO
+
+def test_categorization_edge_cases():
+    """Testa casos extremos de categorização."""
+    categorizer = KeywordCategorizer()
+    
+    # Teste com descrição vazia
+    transaction = Transaction(
+        date=datetime.now(),
+        description="",
+        amount=Decimal("100.00"),
+        type=TransactionType.CREDIT
+    )
+    
+    categorized = categorizer.categorize([transaction])
+    assert categorized[0].category == TransactionCategory.NAO_CATEGORIZADO
+```
 
 ## Execução de Testes
 
@@ -159,6 +254,92 @@ Confirme que:
 5. ✅ Documentação de testes atualizada
 6. ✅ Fixtures e mocks apropriados
 
+## 🐛 Debugging de Testes
+
+### **Comandos de Debug:**
+```bash
+# Executar com output detalhado
+python -m pytest tests/unit/test_models.py -v -s
+
+# Executar apenas um teste específico
+python -m pytest tests/unit/test_models.py::test_transaction_creation -v -s
+
+# Executar com traceback completo
+python -m pytest tests/unit/test_models.py --tb=long
+
+# Executar com pdb (debugger)
+python -m pytest tests/unit/test_models.py --pdb
+
+# Executar com logging
+python -m pytest tests/unit/test_models.py -v -s --log-cli-level=DEBUG
+```
+
+### **Técnicas de Debug:**
+```python
+def test_complex_function():
+    """Exemplo de teste com debugging."""
+    # Arrange
+    input_data = {"key": "value"}
+    
+    # Debug: Imprimir dados de entrada
+    print(f"Input data: {input_data}")
+    
+    # Act
+    result = function_under_test(input_data)
+    
+    # Debug: Imprimir resultado
+    print(f"Result: {result}")
+    
+    # Assert
+    assert result is not None
+    assert result["status"] == "success"
+```
+
+### **Problemas Comuns e Soluções:**
+
+#### **1. Teste Falhando Sem Motivo Claro:**
+```bash
+# Executar com traceback longo
+python -m pytest tests/unit/test_models.py --tb=long -v
+
+# Verificar se há imports faltando
+python -c "import sys; print(sys.path)"
+```
+
+#### **2. Mock Não Funcionando:**
+```python
+# Verificar se o mock está sendo aplicado
+@patch('src.services.bank_api.BankAPI.get_balance')
+def test_balance_retrieval(mock_get_balance):
+    mock_get_balance.return_value = Decimal("1000.00")
+    
+    # Debug: Verificar se mock foi chamado
+    print(f"Mock called: {mock_get_balance.called}")
+    print(f"Mock call count: {mock_get_balance.call_count}")
+```
+
+#### **3. Dados de Teste Incorretos:**
+```python
+def test_with_real_data():
+    """Teste com dados reais para debug."""
+    # Carregar dados reais
+    with open("data/samples/real_transaction.json") as f:
+        real_data = json.load(f)
+    
+    # Debug: Imprimir estrutura dos dados
+    print(f"Real data structure: {real_data.keys()}")
+    
+    # Executar teste
+    result = process_transaction(real_data)
+    assert result is not None
+```
+
+### **Ferramentas de Debug:**
+- **pytest-sugar**: Interface mais amigável
+- **pytest-html**: Relatórios HTML
+- **pytest-clarity**: Assertions mais claras
+- **pytest-mock**: Mocking simplificado
+
 ## Ferramentas Recomendadas
 
 - **pytest**: Framework principal
@@ -166,3 +347,6 @@ Confirme que:
 - **pytest-mock**: Mocking simplificado
 - **pytest-xdist**: Execução paralela
 - **factory-boy**: Geração de dados de teste
+- **pytest-sugar**: Interface amigável
+- **pytest-html**: Relatórios HTML
+- **pytest-clarity**: Assertions claras

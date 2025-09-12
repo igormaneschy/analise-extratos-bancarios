@@ -13,9 +13,10 @@ import pdfplumber
 from src.domain.models import BankStatement, Transaction, TransactionType
 from src.domain.interfaces import StatementReader
 from src.domain.exceptions import FileNotSupportedError, ParsingError
+from src.infrastructure.readers.base_reader import BaseStatementReader
 
 
-class PDFStatementReader(StatementReader):
+class PDFStatementReader(BaseStatementReader):
     # Load configuration from a JSON file
     CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'pdf_reader_config.json')
 
@@ -38,6 +39,7 @@ class PDFStatementReader(StatementReader):
     bank_name_patterns = config.get('bank_name_patterns', [])
 
     def __init__(self):
+        super().__init__()
         self.currency = self.config.get('currency', 'EUR')
         self.credit_pattern = self.config.get('credit_pattern', r'\+?\d+(?:[.,]\d+)?')
         self.debit_pattern = self.config.get('debit_pattern', r'-?\d+(?:[.,]\d+)?')
@@ -59,10 +61,11 @@ class PDFStatementReader(StatementReader):
             return BankStatement(
                 bank_name=bank_name,
                 account_number=account_number,
-                period_start=period[0] if period else None,
-                period_end=period[1] if period else None,
+                period_start=period[0] if period else self._extract_start_date(transactions),
+                period_end=period[1] if period else self._extract_end_date(transactions),
                 initial_balance=initial_balance,
                 final_balance=final_balance,
+                currency=self.currency,
                 transactions=transactions
             )
         except Exception as e:
@@ -177,29 +180,19 @@ class PDFStatementReader(StatementReader):
         description = line.replace(date_match.group(0), '').replace(amount_match.group(0), '').strip()
 
         # Determine credit or debit based on sign of amount
-        if amount < 0:
-            transaction_type = TransactionType.DEBIT
-        else:
-            transaction_type = TransactionType.CREDIT
+        transaction_type = self._determine_transaction_type(amount, description)
 
         # Parse date to datetime object
-        try:
-            date_str = date_match.group(0)
-            for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d']:
-                try:
-                    date_obj = datetime.strptime(date_str, fmt)
-                    break
-                except ValueError:
-                    continue
-            else:
-                date_obj = datetime.now()
-        except Exception:
-            date_obj = datetime.now()
+        date_str = date_match.group(0)
+        date_obj = self._parse_date(date_str)
+
+        # Armazena o valor absoluto na transação
+        amount = abs(amount)
 
         return Transaction(
             date=date_obj,
             description=description,
-            amount=amount,  # Preserve the sign of the amount
+            amount=amount,
             type=transaction_type
         )
 

@@ -1,6 +1,15 @@
----
+#!/usr/bin/env python3
+"""
+Script para criar versões genéricas das regras do projeto.
+"""
+import os
+from pathlib import Path
+
+def create_generic_clean_architecture():
+    """Cria versão genérica da regra de Clean Architecture."""
+    content = """---
 description: Clean Architecture agnóstica - separação de responsabilidades e dependências
-globs: src//*, app//, domain//
+globs: ["src/**/*", "app/**/*", "lib/**/*", "packages/**/*", "domain/**/*"]
 alwaysApply: true
 ---
 
@@ -39,31 +48,26 @@ Utils/Shared ←────┘
 - ❌ **NÃO PODE**: Importar de outras camadas, acessar banco de dados, fazer I/O, depender de frameworks
 
 ```python
-# ✅ CORRETO - Exemplos do domínio bancário
+# ✅ CORRETO - Exemplos genéricos
 @dataclass
-class BankStatement:
-    bank_name: str
-    account_number: str
-    period_start: datetime
-    period_end: datetime
-    transactions: List[Transaction]
-    currency: str = "EUR"
+class User:
+    id: str
+    email: str
+    created_at: datetime
 
 @dataclass
-class Transaction:
-    date: datetime
-    description: str
-    amount: Decimal
-    type: TransactionType
-    balance_after: Optional[Decimal] = None
+class Product:
+    id: str
+    name: str
+    price: Decimal
+    category: str
 
-class ParsingError(Exception):
-    """Exceção para erros de parsing de extratos."""
+class DomainError(Exception):
     pass
 
 # ❌ INCORRETO - não importar de outras camadas
-from src.infrastructure.readers.pdf_reader import PDFReader  # ERRADO!
-from src.application.use_cases import AnalyzeStatementUseCase  # ERRADO!
+from src.infrastructure.database import Database  # ERRADO!
+from src.application.services import UserService  # ERRADO!
 ```
 
 ### 📁 Application/Services (src/application/ ou src/services/)
@@ -72,22 +76,20 @@ from src.application.use_cases import AnalyzeStatementUseCase  # ERRADO!
 - ❌ **NÃO PODE**: Acessar dados diretamente, depender de detalhes de implementação
 
 ```python
-# ✅ CORRETO - Exemplos do domínio bancário
-class AnalyzeStatementUseCase:
-    def __init__(self, reader: StatementReader, categorizer: TransactionCategorizer, analyzer: StatementAnalyzer):
-        self.reader = reader
-        self.categorizer = categorizer
-        self.analyzer = analyzer
+# ✅ CORRETO - Exemplos genéricos
+class CreateUserUseCase:
+    def __init__(self, user_repo: UserRepository, validator: UserValidator):
+        self.user_repo = user_repo
+        self.validator = validator
 
-    def execute(self, file_path: Path) -> AnalysisResult:
-        statement = self.reader.read(file_path)
-        categorized_transactions = self.categorizer.categorize(statement.transactions)
-        analysis = self.analyzer.analyze(statement)
-        return AnalysisResult(statement, analysis)
+    def execute(self, user_data: dict) -> User:
+        self.validator.validate(user_data)
+        user = User(**user_data)
+        return self.user_repo.save(user)
 
 # ❌ INCORRETO - acesso direto a dados
-def analyze_statement(self, file_path: str):
-    with open(file_path) as f:  # ERRADO! Acesso direto a arquivo
+def create_user(self, user_data: dict):
+    with open('users.json') as f:  # ERRADO! Acesso direto a arquivo
         data = f.read()
 ```
 
@@ -109,7 +111,7 @@ class DatabaseUserRepository(UserRepository):
 
 # ❌ INCORRETO - lógica de negócio no repository
 def save_with_validation(self, user: User):
-    if self.is_email_unique(user.email):  # Lógica de negócio!
+    if self.is_email_unique(user.email):  # ERRADO! Lógica de negócio
         # Validação deve estar no domain/application
 ```
 
@@ -338,43 +340,43 @@ grep -r "import src\." src/domain/ --include="*.py"
 ### **Passo 2: Extrair Interfaces**
 ```python
 # Antes: Dependência direta
-class StatementAnalyzer:
+class Service:
     def __init__(self):
-        self.pdf_reader = PDFReader()  # ERRADO!
+        self.repository = DatabaseRepository()  # ERRADO!
 
 # Depois: Injeção de dependência
-class StatementAnalyzer:
-    def __init__(self, reader: StatementReader):
-        self.reader = reader  # CORRETO!
+class Service:
+    def __init__(self, repository: Repository):
+        self.repository = repository  # CORRETO!
 ```
 
 ### **Passo 3: Mover Lógica de Negócio**
 ```python
 # Antes: Lógica no Repository
-class TransactionRepository:
-    def save(self, transaction):
-        if transaction.amount < 0:  # ERRADO! Lógica de negócio
-            raise ValueError("Amount must be positive")
+class UserRepository:
+    def save(self, user):
+        if user.email == "":  # ERRADO! Lógica de negócio
+            raise ValueError("Email is required")
 
 # Depois: Lógica no Domain
-class Transaction:
-    def __init__(self, amount: Decimal):
-        if amount < 0:
-            raise InvalidTransactionError("Amount must be positive")
-        self.amount = amount
+class User:
+    def __init__(self, email: str):
+        if not email:
+            raise InvalidUserError("Email is required")
+        self.email = email
 ```
 
 ### **Passo 4: Implementar Factory Pattern**
 ```python
 # Antes: Criação direta
-def analyze_statement(file_path: str):
-    reader = PDFReader()  # ERRADO! Acoplamento forte
-    analyzer = BasicAnalyzer()
+def process_data(data: str):
+    repository = DatabaseRepository()  # ERRADO! Acoplamento forte
+    service = DataService()
 
 # Depois: Factory Pattern
-def analyze_statement(file_path: str):
-    reader = ComponentFactory.get_reader(file_path)
-    analyzer = ComponentFactory.get_analyzer()
+def process_data(data: str):
+    repository = ComponentFactory.get_repository()
+    service = ComponentFactory.get_service()
 ```
 
 ## Ferramentas de Validação
@@ -401,3 +403,26 @@ def test_domain_has_no_external_dependencies():
 ```
 
 Esta regra garante que qualquer projeto mantenha os princípios da Clean Architecture independente da tecnologia ou domínio específico.
+"""
+    return content
+
+def main():
+    """Função principal."""
+    print("🚀 Criando versões genéricas das regras...")
+    
+    # Criar diretório para regras genéricas
+    generic_dir = Path("rules_generic")
+    generic_dir.mkdir(exist_ok=True)
+    
+    # Criar regra genérica de Clean Architecture
+    with open(generic_dir / "clean_architecture.mdc", "w", encoding="utf-8") as f:
+        f.write(create_generic_clean_architecture())
+    
+    print("✅ Regras genéricas criadas em: rules_generic/")
+    print("📁 Arquivos gerados:")
+    print("  - clean_architecture.mdc (versão genérica)")
+    print("")
+    print("💡 Estas regras podem ser usadas em qualquer projeto!")
+
+if __name__ == "__main__":
+    main()

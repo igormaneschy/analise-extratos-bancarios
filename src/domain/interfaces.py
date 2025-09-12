@@ -22,15 +22,6 @@ class StatementReader(ABC):
         pass
 
 
-class TransactionParser(ABC):
-    """Interface para parsers de transações."""
-    
-    @abstractmethod
-    def parse(self, raw_data: str) -> List[Transaction]:
-        """Faz parsing de dados brutos para transações."""
-        pass
-
-
 class StatementAnalyzer(ABC):
     """Interface para analisadores de extratos."""
     
