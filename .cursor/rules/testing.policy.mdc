@@ -1,0 +1,168 @@
+---
+globs: *
+alwaysApply: true
+---
+# Política de Testes
+
+## Objetivo
+Garantir cobertura adequada de testes para todas as alterações de código, mantendo qualidade e confiabilidade do sistema.
+
+## Regras Principais
+
+
+## Sempre na execução dos teste pedir para executar o comando( mostrar o comando ) e informar a saida. 
+
+### ✅ **Sempre criar/atualizar testes quando:**
+- Criar novas funções ou classes
+- Modificar lógica de negócio existente
+- Corrigir bugs (teste de regressão)
+- Adicionar novas funcionalidades
+- Refatorar código crítico
+
+### ✅ **Tipos de teste obrigatórios:**
+- **Testes unitários**: Para funções e métodos individuais
+- **Testes de integração**: Para fluxos completos
+- **Testes de regressão**: Para bugs corrigidos
+
+## Estrutura de Testes
+
+### **Organização de arquivos:**
+```
+tests/
+├── unit/
+│   ├── test_models.py
+│   ├── test_services.py
+│   └── test_utils.py
+├── integration/
+│   ├── test_pdf_processing.py
+│   └── test_excel_processing.py
+└── fixtures/
+    ├── sample_data.json
+    └── mock_responses.py
+```
+
+### **Convenções de nomenclatura:**
+- Arquivos: `test_<module_name>.py`
+- Classes: `Test<ClassName>`
+- Métodos: `test_<functionality>_<expected_result>`
+
+## Padrões de Qualidade
+
+### **Cobertura mínima:**
+- **Código novo**: 80% de cobertura
+- **Código crítico**: 90% de cobertura
+- **Funções de utilidade**: 100% de cobertura
+
+### **Estrutura de teste (AAA Pattern):**
+```python
+def test_function_should_return_expected_result():
+    # Arrange - Preparar dados
+    input_data = {"key": "value"}
+    expected_result = "expected"
+    
+    # Act - Executar função
+    result = function_under_test(input_data)
+    
+    # Assert - Verificar resultado
+    assert result == expected_result
+```
+
+## Testes Específicos do Projeto
+
+### **Para processamento de PDFs:**
+- Teste com PDFs válidos e inválidos
+- Teste de extração de dados específicos
+- Teste de tratamento de erros
+
+### **Para processamento de Excel:**
+- Teste com diferentes formatos de planilha
+- Teste de validação de dados
+- Teste de conversão de tipos
+
+### **Para categorização:**
+- Teste de regras de classificação
+- Teste de padrões de transação
+- Teste de casos extremos
+
+## Execução de Testes
+
+### **Comandos básicos:**
+```bash
+# Executar todos os testes
+python -m pytest
+
+# Executar com cobertura
+python -m pytest --cov=src --cov-report=html
+
+# Executar testes específicos
+python -m pytest tests/unit/test_models.py
+```
+
+### **Integração contínua:**
+- Testes devem passar antes de commit
+- Cobertura não deve diminuir
+- Testes devem ser rápidos (<30s total)
+
+## Mocks e Fixtures
+
+### **Quando usar mocks:**
+- APIs externas
+- Operações de arquivo
+- Dependências custosas
+- Comportamentos não-determinísticos
+
+### **Fixtures recomendadas:**
+```python
+@pytest.fixture
+def sample_pdf_data():
+    return load_test_pdf("sample_extract.pdf")
+
+@pytest.fixture
+def mock_bank_api():
+    with patch('src.services.bank_api') as mock:
+        yield mock
+```
+
+## Mensagens de Commit
+
+### **Formato para commits com testes:**
+```
+<tipo>(<escopo>): <descrição>
+
+- Adiciona testes para <funcionalidade>
+- Cobertura: <percentual>%
+- Casos testados: <lista_resumida>
+```
+
+### **Exemplos:**
+```
+feat(pdf): adiciona extração de saldo inicial
+
+- Adiciona testes para extração de saldo
+- Cobertura: 85%
+- Casos testados: PDF válido, inválido, formato europeu
+
+test(excel): melhora cobertura de processamento
+
+- Adiciona testes para casos extremos
+- Cobertura: 92%
+- Casos testados: planilhas vazias, dados malformados
+```
+
+## Validação Antes do Commit
+
+Confirme que:
+1. ✅ Todos os testes passam
+2. ✅ Cobertura não diminuiu
+3. ✅ Novos testes foram adicionados para código novo
+4. ✅ Testes de regressão para bugs corrigidos
+5. ✅ Documentação de testes atualizada
+6. ✅ Fixtures e mocks apropriados
+
+## Ferramentas Recomendadas
+
+- **pytest**: Framework principal
+- **pytest-cov**: Cobertura de código
+- **pytest-mock**: Mocking simplificado
+- **pytest-xdist**: Execução paralela
+- **factory-boy**: Geração de dados de teste

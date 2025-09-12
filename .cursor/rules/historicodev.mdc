@@ -1,0 +1,96 @@
+---
+description: Histórico de desenvolvimento padronizado (dev_history.md)
+globs: *
+alwaysApply: true
+---
+
+## Objetivo
+Garantir que toda alteração relevante em arquivos de código seja registrada de forma padronizada em um arquivo de histórico no repositório, facilitando auditoria, rastreabilidade e fornecendo contexto contínuo para agentes e pessoas.
+
+Arquivo de histórico recomendado: **dev_history.md** na raiz do projeto.
+
+## Como aplicar
+Sempre que um arquivo de código for criado, alterado, movido ou removido, adicione uma nova entrada ao início do arquivo de histórico usando o template abaixo.
+Nunca deletar linhas, sempre dever ser inserida informação nova ao início do arquivo.
+
+
+
+Para registrar a data automaticamente:
+- **macOS/Linux**: `date +"%Y-%m-%d"`
+
+## Template da entrada
+```
+[{{DATA_ATUAL}}] - {{NOME_AUTOR}}
+Arquivos: {{LISTA_ARQUIVOS_RELATIVOS_A_RAIZ}}
+Ação/Tipo: [Correção | Melhoria | Refatoração | Bug | Documentação | Configuração | Teste]
+Descrição: {{BREVE_DESCRICAO_EM_ATÉ_2_LINHAS}}
+Detalhes:
+Problema: {{PROBLEMA_IDENTIFICADO}}
+Causa: {{CAUSA_RAIZ}}
+Solução: {{SOLUCAO_IMPLEMENTADA}}
+Observações: {{OBSERVACOES_EXTRAS}}
+
+```
+
+## Instruções específicas
+- **Autor**: Use "Assistant" para alterações automatizadas, seu nome para alterações manuais
+- **Arquivos**: Liste todos os arquivos impactados com paths relativos à raiz do repositório
+- **Tipo**: Escolha um dos valores válidos listados acima
+- **Descrição**: Máximo 2 linhas, seja específico e claro
+- **Detalhes**: Preencha todas as seções quando aplicável
+
+## Convenções de paths
+Use sempre paths completos relativos à raiz:
+- `src/domain/models.py`
+- `config/app.yaml`
+- `tests/test_payment_flow.py`
+- `scripts/data_migration_v3.py`
+
+## Exemplo prático
+```
+[2025-08-13] - Assistant
+Arquivos: src/services/transaction_analyzer.py, src/domain/models.py
+Ação/Tipo: Melhoria
+Descrição: Implementa análise de padrões de gasto com abordagem de ML.
+Detalhes:
+Problema: Regras atuais não capturavam padrões complexos
+Causa: Algoritmo baseado apenas em heurísticas simples
+Solução: Integração de modelo de detecção de padrões e anomalias
+Observações: Acurácia preliminar de 87% em dados de 6 meses
+```
+
+## Escopo de documentação
+
+### ✅ SEMPRE documentar:
+- Alterações em código-fonte (src/, app/, lib/, etc.)
+- Arquivos de entrada principal
+- Configurações (config/, .env.example sem segredos)
+- Testes (tests/, test_*.py)
+- Dependências (requirements.txt, pyproject.toml, package.json)
+- Correções de bug em qualquer arquivo
+- Migrações (database/migrations/)
+
+### ❌ NÃO documentar:
+- Arquivos temporários (*.tmp, *.bak)
+- Cache/artefatos de build (__pycache__/, *.pyc, dist/, build/)
+- Metadados de IDE (.vscode/, .idea/)
+- Dados sensíveis ou binários de modelos (secrets.json, *.pkl, *.onnx, *.pt)
+- Backups automáticos
+- A pasta mcp_system/
+- Relatórios gerados automaticamente (reports/)
+- Pastas de legado (legacy/, old_version/) exceto quando alteradas intencionalmente
+
+## Validação antes do commit
+Confirme que:
+1. ✅ Data está no formato YYYY-MM-DD
+2. ✅ Todos os arquivos impactados estão listados com paths relativos
+3. ✅ Tipo é um dos valores válidos
+4. ✅ Seção Detalhes está preenchida quando aplicável
+5. ✅ Não há informações sensíveis nos textos
+6. ✅ Entrada foi adicionada ao final do arquivo de histórico
+
+## Casos especiais
+- **Renomeações**: Liste como `from -> to` (ex.: `src/utils.py -> src/utils/strings.py`)
+- **Exclusões**: Marque o arquivo e indique "removido" em Observações
+- **Commits atômicos**: Prefira uma entrada por mudança lógica
+- **Privacidade**: Jamais copiar conteúdo sensível; apenas referencie descritivamente

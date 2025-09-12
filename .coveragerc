@@ -4,6 +4,8 @@ omit =
     */__pycache__/*
     .venv/*
     venv/*
+    mem_store.py
+    get_stats.py
 
 [report]
 exclude_lines =

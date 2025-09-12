@@ -1,0 +1,56 @@
+---
+description: "Princípios DRY e KISS para código sustentável"
+globs: ["src/**/*", "app/**/*", "domain/**/*"]
+alwaysApply: true
+---
+
+## Objetivo
+Evitar duplicação de lógica e manter o código simples e legível.
+
+---
+
+## 1. DRY — Don't Repeat Yourself
+Não repita lógica em diferentes lugares.
+
+✅ Correto:
+```python
+def calculate_tax(amount, rate):
+    return amount * rate
+```
+
+❌ Errado:
+```python
+def calculate_vat(amount):
+    return amount * 0.23
+
+def calculate_service_tax(amount):
+    return amount * 0.23
+```
+
+---
+
+## 2. KISS — Keep It Simple, Stupid
+Prefira soluções simples e legíveis.
+
+✅ Correto:
+```python
+if user.is_admin:
+    grant_access()
+```
+
+❌ Errado:
+```python
+if user.role == "admin" or user.role == "administrator" or user.role_code == 999:
+    grant_access()
+```
+
+---
+
+## 3. YAGNI — You Aren’t Gonna Need It
+Não implemente funcionalidades antes de precisar.
+
+✅ Correto:
+- Implementar apenas métodos necessários agora.
+
+❌ Errado:
+- Criar classes genéricas para cenários que talvez nunca aconteçam.

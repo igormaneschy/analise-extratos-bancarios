@@ -1,0 +1,115 @@
+---
+description: "Princípios SOLID para design orientado a objetos"
+globs: ["src/**/*", "app/**/*", "domain/**/*"]
+alwaysApply: true
+---
+
+## Objetivo
+Promover design modular, extensível e de fácil manutenção.
+
+---
+
+## 1. Single Responsibility Principle (SRP)
+Cada classe/módulo deve ter uma única responsabilidade.
+
+✅ Correto:
+```python
+class InvoicePrinter:
+    def print(self, invoice): ...
+
+class InvoiceRepository:
+    def save(self, invoice): ...
+```
+
+❌ Errado:
+```python
+class InvoiceManager:
+    def save(self, invoice): ...
+    def print(self, invoice): ...
+    def send_email(self, invoice): ...
+```
+
+---
+
+## 2. Open/Closed Principle (OCP)
+Entidades devem estar abertas para extensão, mas fechadas para modificação.
+
+✅ Correto:
+```python
+class DiscountStrategy:
+    def apply(self, amount): return amount
+
+class BlackFridayDiscount(DiscountStrategy):
+    def apply(self, amount): return amount * 0.5
+```
+
+❌ Errado:
+```python
+def apply_discount(type, amount):
+    if type == "blackfriday":
+        return amount * 0.5
+    elif type == "student":
+        return amount * 0.9
+```
+
+---
+
+## 3. Liskov Substitution Principle (LSP)
+Subtipos devem poder substituir seus tipos base sem alterar o funcionamento.
+
+✅ Correto:
+```python
+class Bird:
+    def fly(self): ...
+
+class Sparrow(Bird):
+    def fly(self): print("Flying low")
+```
+
+❌ Errado:
+```python
+class Ostrich(Bird):
+    def fly(self): raise Exception("I can't fly!")
+```
+
+---
+
+## 4. Interface Segregation Principle (ISP)
+Prefira várias interfaces específicas a uma interface genérica e pesada.
+
+✅ Correto:
+```python
+class Workable:
+    def work(self): ...
+
+class Feedable:
+    def eat(self): ...
+```
+
+❌ Errado:
+```python
+class Worker:
+    def work(self): ...
+    def eat(self): ...
+```
+
+---
+
+## 5. Dependency Inversion Principle (DIP)
+Dependa de abstrações, não de implementações.
+
+✅ Correto:
+```python
+class Repository(ABC):
+    def save(self, entity): ...
+
+class SqlRepository(Repository):
+    def save(self, entity): ...
+```
+
+❌ Errado:
+```python
+class Service:
+    def __init__(self):
+        self.repo = SqlRepository()  # Forte acoplamento
+```

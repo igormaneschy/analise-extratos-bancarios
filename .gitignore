@@ -43,7 +43,18 @@ htmlcov/
 
 # Logs
 *.log
-*.md
+
+# Relatórios de cobertura e output de testes
+coverage_report*.txt
+coverage_summary*.txt
+coverage_after_*.txt
+final_coverage_report*.txt
+pytest_*.txt
+relatorio*.txt
+
+# Arquivos de desenvolvimento
+get_stats.py
+mem_store.py
 
 # Dados sensíveis
 .env
@@ -76,6 +87,7 @@ temp/
 
 # índices e memória gerados em runtime
 # MCP drop-in
+mem_store.py
 mcp_system/.mcp_index/
 mcp_system/.mcp_memory/
 mcp_system/.emb_cache/
